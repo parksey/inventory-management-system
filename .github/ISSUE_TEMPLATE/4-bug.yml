@@ -1,0 +1,35 @@
+name: 버그 수정
+description: 의도와 다르게 동작하는 것을 고친다
+title: "fix(<scope>): "
+labels: ["fix"]
+body:
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 현상
+      description: 무엇이 잘못 동작하는가 (에러 메시지, 응답 등)
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 재현 방법
+      placeholder: |
+        1. 재고 10인 상품에
+        2. 출고 5를 동시에 3번 요청하면
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대 동작
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 완료 조건
+      placeholder: |
+        - [ ] 재현 시나리오가 테스트로 추가되고 통과한다
+    validations:
+      required: true

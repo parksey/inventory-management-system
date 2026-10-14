@@ -1,0 +1,41 @@
+name: 기능 수정
+description: 있는 기능의 동작을 바꾼다
+title: "feat(<scope>): "
+labels: ["change"]
+body:
+  - type: textarea
+    id: current
+    attributes:
+      label: 현재 동작
+    validations:
+      required: true
+  - type: textarea
+    id: desired
+    attributes:
+      label: 바꿀 동작
+    validations:
+      required: true
+  - type: textarea
+    id: reason
+    attributes:
+      label: 이유
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 완료 조건
+      placeholder: |
+        - [ ] 바뀐 동작이 테스트로 검증된다
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: 영향 범위
+      description: 이 변경으로 함께 영향받는 기능 · API
+  - type: textarea
+    id: questions
+    attributes:
+      label: Open Questions
+      description: 불명확한 부분. 추측해서 채우지 않습니다

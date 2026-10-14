@@ -1,0 +1,36 @@
+name: 기능 요구사항
+description: PM이 받은 기능 요청. 구체화 후 하위 이슈(sub-issue)를 묶는 상위 이슈
+title: "[요구사항] "
+labels: ["requirement"]
+body:
+  - type: markdown
+    attributes:
+      value: 사용자 관점에서 "무엇을 할 수 있어야 하는가"만 씁니다. 해야 할 일은 구체화 후 하위 이슈로 나눕니다.
+  - type: textarea
+    id: background
+    attributes:
+      label: 배경
+      description: 왜 필요한가
+    validations:
+      required: true
+  - type: textarea
+    id: requirements
+    attributes:
+      label: 요구사항
+      description: "~할 수 있어야 한다"
+      placeholder: |
+        - 상품을 출고할 수 있어야 한다
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: 성공 기준
+      placeholder: |
+        - [ ] 재고보다 많이 출고할 수 없다
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: 제약 · 범위 밖
