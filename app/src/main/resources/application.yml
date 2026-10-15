@@ -7,6 +7,9 @@ spring:
     import: classpath:inventory-db.yml
   jpa:
     open-in-view: false
+  jackson:
+    deserialization:
+      accept-float-as-int: false
   lifecycle:
     timeout-per-shutdown-phase: 20s
 

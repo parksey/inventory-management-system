@@ -75,7 +75,7 @@ inventory/core/    com.logistics.inventory.domain
   ├─ product/
   │    ├─ entity/    Product(엔티티), ProductCode(VO)
   │    └─ port/      ProductStore(저장 포트 인터페이스)
-  ├─ inventory/      InventoryService
+  ├─ inventory/      InventoryService, ProductRegistrar(상품과 재고를 함께 만드는 도메인 서비스)
   │    ├─ entity/    Inventory, Quantity
   │    ├─ model/     Command/Result (StockResult 등, 바깥과 주고받는 record)
   │    └─ port/      InventoryStore
@@ -89,7 +89,7 @@ inventory/schema/  src/main/resources/db/migration/   V{이슈번호}_{순번}__
 support/flyway/    src/main/resources/db/migration/   공용 기초 데이터 (같은 버전 규칙, Java 코드 없음)
 support/p6spy/     com.logistics.inventory.p6spy   PrettySqlFormatter, autoconfigure/P6SpyFormatterAutoConfiguration
 app/               com.logistics.inventory.api
-  ├─ inventory/      InventoryController, *Request, *Response
+  ├─ inventory/      유스케이스마다 컨트롤러 (InventoryController 조회, InboundController 입고), *Request, *Response
   ├─ common/         GlobalExceptionHandler, ErrorStatusMapper(ErrorKind → HttpStatus), ApiResponse
   ├─ InventoryApplication (scanBasePackages = "com.logistics.inventory")
   └─ resources/      application.yml, application-local.yml, application-prod.yml
@@ -107,6 +107,8 @@ Response DTO ◄──from(result)── Result ◄─────┘
 ```
 
 - **Controller는 엔티티를 받지도, 반환하지도 않는다.** 요청은 `Request.toCommand()`로 Command로 바꾸고, 응답은 `Response.from(result)`로 만든다. 엔티티가 API 응답에 노출되면 테이블 구조가 API 계약이 되고, 지연 로딩 예외와 순환 참조가 생긴다.
+- **상태를 바꾸는 요청(입고, 출고)은 데이터를 돌려주지 않는다** (`ApiResponse<Void>`, 서비스는 `void`). 바뀐 상태가 필요하면 조회 API로 읽는다. 결과를 돌려주면 같은 요청이 다시 왔을 때 첫 결과를 저장했다가 다시 만들어 줘야 한다(멱등성).
+- 컨트롤러는 유스케이스마다 나눈다 (`InboundController`, `OutboundController`, 조회는 `InventoryController`). 경로는 같은 `/v1/inventory` 아래에 두고, 서비스는 흐름과 의존성을 공유하면 하나로 둔다.
 - Command·Result·Request·Response는 모두 **record**.
 - Controller에는 비즈니스 로직이 없다 — 변환과 위임만 한다.
 - 검증은 두 층으로 나눈다:
@@ -136,7 +138,8 @@ Response DTO ◄──from(result)── Result ◄─────┘
 | 대상 | 규칙 |
 |---|---|
 | `@Setter`, `@Data` | **전 모듈 금지** — 캡슐화를 무너뜨리고 불변식 우회 경로를 만든다 |
-| 엔티티의 `@Builder`, `@AllArgsConstructor` | 사용하지 않는다 — 정적 팩토리를 우회해 불변식 검증 없이 객체가 생긴다 |
+| 엔티티의 `@AllArgsConstructor` | 사용하지 않는다 — 정적 팩토리를 우회해 불변식 검증 없이 객체가 생긴다 |
+| 엔티티의 `@Builder` | private 생성자에 `@Builder(access = AccessLevel.PRIVATE)`로만 붙이고, 정적 팩토리(`Product.register`, `Inventory.create`) 안에서만 쓴다. 기본 `@Builder`는 `public static builder()`를 만들어 바깥에서 팩토리의 규칙을 건너뛸 수 있다 |
 | `@Getter`, `@RequiredArgsConstructor`, `@NoArgsConstructor(access = PROTECTED)` | 허용 |
 | `final` | 적극 사용: 주입받는 의존성(`private final`), 메서드 파라미터, 재할당하지 않는 지역 변수, 엔티티가 아닌 클래스의 필드. 단 **엔티티의 영속 필드는 final로 두지 않는다**(JPA 스펙상 프록시·리플렉션 주입 대상) |
 | 긴 파라미터 목록 | 한 줄에 다 들어가지 않으면 파라미터를 한 줄에 하나씩 두고, 닫는 괄호 `) {`는 따로 한 줄에 둔다 |
@@ -152,16 +155,21 @@ Response DTO ◄──from(result)── Result ◄─────┘
 ### 3.5 애그리거트 사이의 협력
 - **흐름은 유스케이스 서비스가, 규칙은 애그리거트가.** 한 애그리거트 안의 로직은 엔티티·VO에 위임하고, 서비스는 여러 애그리거트를 어떤 순서로 부를지만 정한다.
 - 애그리거트끼리는 **ID나 VO만** 주고받는다. 애그리거트 A의 엔티티를 B의 메서드에 넘기지 않는다.
-- 애그리거트 A의 도메인 로직 안에서 B의 Store를 부르지 않는다. 여러 애그리거트의 Store를 함께 쓰는 곳은 유스케이스 서비스뿐이다.
+- 애그리거트 A의 도메인 로직(엔티티, VO) 안에서 B의 Store를 부르지 않는다. 여러 애그리거트의 Store를 함께 쓰는 곳은 유스케이스 서비스와, 아래의 함께 만드는 규칙을 가진 도메인 서비스뿐이다.
+- **A가 생기면 B도 반드시 생겨야 하는 규칙**(상품이 생기면 수량 0인 재고도 생긴다)은 이름 있는 도메인 서비스(`ProductRegistrar`)에 둔다. 만드는 길이 하나로 모여서, 나중에 A를 만드는 다른 기능이 생겨도 B가 빠지지 않는다.
+  - A는 자연키 유니크로 `INSERT ... ON CONFLICT DO NOTHING`해서 넣고, **이 트랜잭션이 실제로 넣었을 때만** B를 만든다. 다른 트랜잭션이 먼저 넣었다면 그쪽이 같은 트랜잭션에서 B도 만들어 커밋했다.
+  - 도메인 서비스는 B 쪽 패키지에 둔다(`inventory`). 의존 방향이 `inventory` → `product` 한쪽이라, `product`에 두면 두 패키지가 서로를 참조한다.
+  - B를 조회했는데 없으면 고쳐 넣지 않고 `IllegalStateException`(500)으로 드러낸다. 앱을 거치지 않은 데이터 손상이다.
 - 서비스 메서드에서 애그리거트 경계가 바뀌는 지점에 한 줄 한국어 코멘트를 단다.
   ```java
-  // 상품 (Product)
-  final Product product = productStore.saveIfAbsent(Product.register(command.productCode(), command.name()));
+  // 상품 (Product) — 없으면 수량 0인 재고와 함께 등록
+  final Product product = productRegistrar.getOrRegister(command.productCode());
   // 재고 (Inventory) — 행 잠금 후 증가
-  final Inventory inventory = getForUpdate(product.getId());
+  final Inventory inventory = inventoryStore.findByProductIdForUpdate(product.getId())
+      .orElseThrow(() -> new IllegalStateException("상품은 있는데 재고 행이 없습니다. productId=" + product.getId()));
   final StockChange change = inventory.increase(command.quantity());
   // 원장 (StockTransaction)
-  stockTransactionStore.save(StockTransaction.record(change, command.idempotencyKey()));
+  stockTransactionStore.save(StockTransaction.record(change, command.requesterId()));
   ```
 - **일급 컬렉션**: 같은 스트림 필터·검사를 두 번 이상 쓰게 되면 `List<X>` 대신 컬렉션 클래스로 뽑고 도메인 의미가 있는 메서드를 둔다.
 
@@ -169,7 +177,7 @@ Response DTO ◄──from(result)── Result ◄─────┘
 | 패턴 | 이유 |
 |---|---|
 | 구현이 하나뿐인 서비스에 인터페이스(`XxxUseCase`) | 포트는 실제 인프라 경계(Store 등)에만 둔다. 가짜 추상화는 읽을 파일만 늘린다 |
-| 한 줄짜리 wrapper, 한 군데서만 쓰는 의미 없는 private helper | 인라인한다. helper는 중복을 없애면서 도메인 의미를 주는 것만 남긴다 (`getForUpdate` 같은) |
+| 한 줄짜리 wrapper, 한 군데서만 쓰는 의미 없는 private helper | 인라인한다. helper는 중복을 없애면서 도메인 의미를 주는 것만 남긴다 |
 | 서비스의 읽기 전용 사전 검증(`assertXxx`) 후 별도 변경 | 락 없이 검증하고 나중에 바꾸면 그 사이에 다른 Pod가 값을 바꿀 수 있다. 불변식은 **락을 잡은 뒤 엔티티 메서드 안에서** 검증한다 |
 | 여러 애그리거트를 한 번에 검사하는 Checker 클래스 | 규칙의 주인이 흐려진다. 규칙은 각 애그리거트가 가진다 |
 
@@ -183,6 +191,8 @@ Response DTO ◄──from(result)── Result ◄─────┘
   - `InventoryJpaRepository extends JpaRepository<Inventory, Long>` — Spring Data 인터페이스 (db 내부 전용, package-private 권장)
   - `InventoryStoreAdapter implements InventoryStore` — 도메인 인터페이스 구현, `@Repository`
 - native query·락 힌트·`ON CONFLICT` 같은 DB 특화 코드는 전부 `db`에만 있다.
+- **id를 직접 넣는 엔티티**(`Inventory`의 `productId`)를 새로 저장할 때는 어댑터에서 `EntityManager.persist`를 쓴다. `JpaRepository.save`는 id가 있으면 새 객체가 아니라고 보고 `merge`해서, INSERT 전에 SELECT가 한 번 더 나가고 넘긴 객체가 아니라 복사본이 영속 상태가 된다(이후 변경이 저장되지 않는다). 이미 영속 상태인 엔티티의 변경은 `save`를 부르지 않고 변경 감지에 맡긴다.
+- `@Modifying` 쿼리는 `void`, `int`, `long`만 돌려줄 수 있다. 행 수를 도메인 의미(`boolean`)로 바꾸는 일은 어댑터가 한다 (`== INSERTED`).
 
 ---
 
@@ -208,7 +218,9 @@ Pod가 여러 개 떠 있으므로 **한 JVM 안에서만 유효한 수단은 �
 2. 엔티티 메서드(`increase`/`decrease`)로 변경 — 불변식은 도메인이 검증
 3. 변경 감지로 저장 + 같은 트랜잭션에서 원장 기록
 
-- 신규 상품 최초 입고: `db`에서 `INSERT ... ON CONFLICT (product_code) DO NOTHING` 후 조회/락 — 여러 Pod가 같은 상품 코드를 동시에 입고해도 상품은 한 건.
+- 신규 상품 최초 입고: `db`에서 `INSERT ... ON CONFLICT (product_code) DO NOTHING` 후 다시 조회 — 여러 Pod가 같은 상품 코드를 동시에 입고해도 상품은 한 건이고, 진 요청도 실패하지 않는다. 뒤 요청은 유니크 인덱스에서 앞 요청의 커밋을 기다렸다가 0행으로 넘어가고, READ COMMITTED라 다시 조회하면 앞 요청의 행이 보인다. 조회 후 그냥 `save`하면 진 요청은 유니크 위반으로 트랜잭션이 실패한다(3.5의 함께 만드는 규칙 참고).
+- **READ COMMITTED(PostgreSQL 기본)에 기댄다.** REPEATABLE READ 이상으로 올리면 위 재조회가 앞 요청의 행을 보지 못하거나 직렬화 오류가 나므로 격리 수준을 바꾸지 않는다. Hibernate `FlushMode`도 기본(AUTO)을 유지한다 — `persist`한 엔티티가 다음 조회 전에 INSERT되는 것에 기댄다.
+- **잠금 대기 상한은 커넥션 초기화로 건다**: `spring.datasource.hikari.connection-init-sql: SET lock_timeout = '3s'`. 행 잠금과 유니크 인덱스 대기 모두에 적용되고, 넘기면 `PessimisticLockingFailureException` → 503이다. PostgreSQL에는 `FOR UPDATE`에 대기 시간을 주는 문법이 없어 `jakarta.persistence.lock.timeout` 힌트에 기대지 않는다.
 - 여러 상품을 한 트랜잭션에서 잠글 때는 **productId 오름차순**으로 락을 획득한다 (데드락 방지).
 - DB 제약은 최후 방어선으로 항상 둔다: `CHECK (quantity >= 0)`, `UNIQUE (product_code)`, `UNIQUE (idempotency_key)`. 앱 로직을 믿더라도 제약을 생략하지 않는다.
 - 낙관적 락(`@Version`)은 재고처럼 같은 row에 경합이 몰리는 곳에 쓰지 않는다 (재시도 폭증).

@@ -6,6 +6,7 @@ spring:
     hikari:
       maximum-pool-size: ${DB_POOL_SIZE:10}
       connection-timeout: 3000
+      connection-init-sql: SET lock_timeout = '3s'   # 잠금을 3초 넘게 기다리면 실패시켜 요청이 쌓이지 않게 한다
   jpa:
     hibernate:
       ddl-auto: validate

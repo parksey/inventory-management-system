@@ -15,4 +15,8 @@ public record Quantity(
             throw BusinessException.of(INVALID_QUANTITY, "value=" + value);
         }
     }
+
+    public Quantity plus(final Quantity other) {
+        return new Quantity(Math.addExact(value, other.value));
+    }
 }
