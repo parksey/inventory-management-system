@@ -5,4 +5,5 @@ include(
     "inventory-domain",
     "inventory-db",
     "support:flyway",
+    "support:p6spy",
 )

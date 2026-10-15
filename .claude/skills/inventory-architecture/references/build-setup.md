@@ -67,7 +67,6 @@ dependencies {
 // 포매터 등록: P6SpyFormatterAutoConfiguration (META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports)
 //   static BeanFactoryPostProcessor에서 System.setProperty("p6spy.config.logMessageFormat", PrettySqlFormatter)
 //   - 스타터는 이미 정의된 값을 덮어쓰지 않는다
-//   - @PostConstruct로 P6SpyOptions를 바꾸면 안 된다: p6spy가 첫 SQL 로깅 때 포매터 인스턴스를 캐시해 반영되지 않는다
 ```
 
 ```kotlin
