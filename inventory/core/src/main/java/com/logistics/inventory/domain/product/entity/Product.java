@@ -10,6 +10,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -29,4 +30,21 @@ public class Product extends BaseTimeEntity {
 
     @Column(nullable = false)
     private String name;
+
+    @Builder(access = AccessLevel.PRIVATE)
+    private Product(
+        final ProductCode productCode,
+        final String name
+    ) {
+        this.productCode = productCode;
+        this.name = name;
+    }
+
+    // 처음 입고되는 상품. 이름은 상품 코드로 시작하고 나중에 바꾼다
+    public static Product register(final ProductCode productCode) {
+        return Product.builder()
+            .productCode(productCode)
+            .name(productCode.value())
+            .build();
+    }
 }
