@@ -28,13 +28,14 @@ public class Product extends BaseTimeEntity {
     @AttributeOverride(name = "value", column = @Column(name = "product_code", nullable = false))
     private ProductCode productCode;
 
-    @Column(nullable = false)
-    private String name;
+    @Embedded
+    @AttributeOverride(name = "value", column = @Column(name = "name", nullable = false))
+    private ProductName name;
 
     @Builder(access = AccessLevel.PRIVATE)
     private Product(
         final ProductCode productCode,
-        final String name
+        final ProductName name
     ) {
         this.productCode = productCode;
         this.name = name;
@@ -44,7 +45,11 @@ public class Product extends BaseTimeEntity {
     public static Product register(final ProductCode productCode) {
         return Product.builder()
             .productCode(productCode)
-            .name(productCode.value())
+            .name(new ProductName(productCode.value()))
             .build();
+    }
+
+    public void rename(final ProductName name) {
+        this.name = name;
     }
 }

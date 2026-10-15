@@ -12,7 +12,7 @@ import org.springframework.data.repository.query.Param;
 interface InventoryJpaRepository extends JpaRepository<Inventory, Long> {
 
     @Query("""
-            select new com.logistics.inventory.domain.inventory.model.StockResult(p.productCode.value, p.name, i.quantity.value)
+            select new com.logistics.inventory.domain.inventory.model.StockResult(p.productCode.value, p.name.value, i.quantity.value)
             from Product p
             join Inventory i on i.productId = p.id
             where p.productCode.value = :productCode

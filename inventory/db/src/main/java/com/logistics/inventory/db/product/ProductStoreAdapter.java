@@ -22,6 +22,6 @@ class ProductStoreAdapter implements ProductStore {
 
     @Override
     public boolean saveIfAbsent(final Product product) {
-        return productJpaRepository.insertIfAbsent(product.getProductCode().value(), product.getName()) == INSERTED;
+        return productJpaRepository.insertIfAbsent(product.getProductCode().value(), product.getName().value()) == INSERTED;
     }
 }
