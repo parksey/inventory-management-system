@@ -44,10 +44,10 @@ gh issue view {N}
 - 위치: `docs/specs/{N}-{영문-설명}.md` (예: `docs/specs/7-outbound.md`). 검증 스크립트가 `docs/specs/{N}-*.md`로 찾는다
 - 섹션, TC ID, 검증 방법 규칙은 workflow.md §4 그대로. **PR 계획**은 단독으로 머지 가능한 단위로 나누고, 작은 이슈는 PR 1개로 충분하다
 
-명세서는 **PR 계획의 첫 PR 브랜치**에 커밋한다. 별도의 명세서 PR은 만들지 않는다 — 승인 후 같은 브랜치에서 구현을 이어가고, 명세서는 첫 PR과 함께 main에 들어간다.
+명세서는 **PR 계획의 첫 PR 브랜치**에 커밋한다. 별도의 명세서 PR은 만들지 않는다 — 승인 후 같은 브랜치에서 구현을 이어가고, 명세서는 첫 PR과 함께 dev에 들어간다.
 ```bash
 git fetch origin
-git switch -c {type}/{N}-{영문-설명} origin/main          # PR 계획 1번의 브랜치 (3-1과 같은 규칙)
+git switch -c {type}/{N}-{영문-설명} origin/dev           # PR 계획 1번의 브랜치 (3-1과 같은 규칙)
 git add docs/specs/{N}-{영문-설명}.md
 git commit -m "docs({scope}): 기능 명세 작성"
 git push -u origin HEAD
@@ -67,10 +67,10 @@ gh issue comment {N} --body-file "$(git rev-parse --git-dir)/spec-request-{N}.md
 ### 3-1. 브랜치
 ```bash
 git fetch origin
-git switch -c {type}/{N}-{영문-설명} origin/main     # 예: feat/7-outbound-domain
+git switch -c {type}/{N}-{영문-설명} origin/dev      # 예: feat/7-outbound-domain
 ```
-main으로 전환하지 않고 `origin/main`에서 바로 분기한다 (worktree에서도 동작).
-첫 PR은 2단계에서 만든 브랜치를 그대로 쓰므로 이 단계를 건너뛴다. 두 번째 PR부터는 첫 PR이 머지된 main에서 분기하므로 명세서가 이미 들어 있다.
+dev로 전환하지 않고 `origin/dev`에서 바로 분기한다 (worktree에서도 동작).
+첫 PR은 2단계에서 만든 브랜치를 그대로 쓰므로 이 단계를 건너뛴다. 두 번째 PR부터는 첫 PR이 머지된 dev에서 분기하므로 명세서가 이미 들어 있다.
 
 ### 3-2. 구현
 - 이 PR의 범위만 구현하고, 이 PR에 배정된 테스트 케이스를 테스트 코드로 함께 작성한다.
@@ -93,7 +93,7 @@ $S {N} --pr-body "$(git rev-parse --git-dir)/pr-{N}.md"   # 모든 PR: 본문의
 $S {N}                                                     # 마지막 PR만: 명세서의 TC가 전부 코드에 있는지
 ```
 - 모두 통과해야 PR을 만든다. 코드 변경이 없는 PR은 스크립트 대신 명세서의 검증 방법을 실행하고 결과를 본문에 적는다.
-- `src/main`을 바꿨는데 `src/test` 변경이 없으면 CI `test-required`에서 실패한다.
+- 동작을 추가하거나 바꿨다면 그 동작의 테스트가 이 PR에 있어야 한다 (설정만 바꾸거나 동작이 그대로인 리팩터링은 예외).
 - `inventory-architecture` skill의 "작업 완료 전 체크리스트"를 확인한다.
 - 가능하면 `/code-review`로 리뷰하고, 지적을 반영하거나 반영하지 않는 이유를 PR에 남긴다.
 
@@ -108,7 +108,7 @@ gh pr create --title "{type}({scope}): {제목}" --body-file "$(git rev-parse --
 - "구현 내용"은 커밋별이 아니라 **한 일 단위 항목**으로 쓴다 (예: "p6spy 모듈화 및 프로파일 분리", "p6spy 로그 읽기 쉽게 formatting"). 명세서를 반복하지 않는다. 명세서와 다르게 한 부분은 "명세와 달라진 점"에
 - **한 일만 적는다.** 실제로 비교하지 않은 대안을 "설계 결정"에 넣지 않는다. 해당 없는 섹션은 "없음"
 - PR 본문 초안은 올리기 전에 개발자에게 보여주고 확인받는다
-- PR을 연 뒤 수정은 새 커밋으로 올린다. 기존 커밋을 고쳐 force-push하지 않는다 (예외: 3-6의 main rebase)
+- PR을 연 뒤 수정은 새 커밋으로 올린다. 기존 커밋을 고쳐 force-push하지 않는다 (예외: 3-6의 dev rebase)
 - **테스트 케이스 표는 필수** — 이 PR이 다룬 TC 전부
 
 ### 3-5. 셀프 리뷰 → 머지 대기
@@ -126,7 +126,7 @@ gh pr checks {PR}
 gh pr merge {PR} --squash --delete-branch --subject "{PR 제목과 같은 문자열}"
 git fetch --prune
 ```
-- 브랜치가 main보다 뒤처져 머지가 막히면 `git rebase origin/main` → `git push --force-with-lease` → CI 재확인 후 다시 머지 대기.
+- 브랜치가 dev보다 뒤처져 머지가 막히면 `git rebase origin/dev` → `git push --force-with-lease` → CI 재확인 후 다시 머지 대기.
 
 다음 PR이 남아 있으면 3-1로 돌아간다.
 
