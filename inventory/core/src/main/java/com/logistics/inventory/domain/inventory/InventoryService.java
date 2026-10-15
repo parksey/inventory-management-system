@@ -6,10 +6,12 @@ import com.logistics.inventory.domain.common.BusinessException;
 import com.logistics.inventory.domain.inventory.entity.Inventory;
 import com.logistics.inventory.domain.inventory.entity.StockChange;
 import com.logistics.inventory.domain.inventory.model.InboundCommand;
+import com.logistics.inventory.domain.inventory.model.OutboundCommand;
 import com.logistics.inventory.domain.inventory.model.StockResult;
 import com.logistics.inventory.domain.inventory.port.InventoryStore;
 import com.logistics.inventory.domain.product.entity.Product;
 import com.logistics.inventory.domain.product.entity.ProductCode;
+import com.logistics.inventory.domain.product.port.ProductStore;
 import com.logistics.inventory.domain.transaction.entity.StockTransaction;
 import com.logistics.inventory.domain.transaction.port.StockTransactionStore;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryService {
 
     private final ProductRegistrar productRegistrar;
+    private final ProductStore productStore;
     private final InventoryStore inventoryStore;
     private final StockTransactionStore stockTransactionStore;
 
@@ -36,10 +39,26 @@ public class InventoryService {
         // 상품 (Product) — 없으면 수량 0인 재고와 함께 등록
         final Product product = productRegistrar.getOrRegister(command.productCode());
         // 재고 (Inventory) — 행 잠금 후 증가
-        final Inventory inventory = inventoryStore.findByProductIdForUpdate(product.getId())
-            .orElseThrow(() -> new IllegalStateException("상품은 있는데 재고 행이 없습니다. productId=" + product.getId()));
+        final Inventory inventory = getInventoryForUpdate(product.getId());
         final StockChange change = inventory.increase(command.quantity());
         // 원장 (StockTransaction)
         stockTransactionStore.save(StockTransaction.record(change, command.requesterId()));
+    }
+
+    @Transactional
+    public void outbound(final OutboundCommand command) {
+        // 상품 (Product) — 없으면 404. 출고는 상품을 만들지 않는다
+        final Product product = productStore.findByProductCode(command.productCode())
+            .orElseThrow(() -> BusinessException.of(PRODUCT_NOT_FOUND, "productCode=" + command.productCode().value()));
+        // 재고 (Inventory) — 행 잠금 후 감소. 재고 부족은 엔티티가 판단한다
+        final Inventory inventory = getInventoryForUpdate(product.getId());
+        final StockChange change = inventory.decrease(command.quantity());
+        // 원장 (StockTransaction)
+        stockTransactionStore.save(StockTransaction.record(change, command.requesterId()));
+    }
+
+    private Inventory getInventoryForUpdate(final Long productId) {
+        return inventoryStore.findByProductIdForUpdate(productId)
+            .orElseThrow(() -> new IllegalStateException("상품은 있는데 재고 행이 없습니다. productId=" + productId));
     }
 }

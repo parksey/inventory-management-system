@@ -9,7 +9,8 @@ public enum ErrorCode {
     INVALID_PRODUCT_CODE("상품 코드 형식이 올바르지 않습니다.", ErrorKind.INVALID),
     INVALID_QUANTITY("수량이 올바르지 않습니다.", ErrorKind.INVALID),
     INVALID_REQUESTER_ID("요청자 ID가 올바르지 않습니다.", ErrorKind.INVALID),
-    PRODUCT_NOT_FOUND("상품을 찾을 수 없습니다.", ErrorKind.NOT_FOUND);
+    PRODUCT_NOT_FOUND("상품을 찾을 수 없습니다.", ErrorKind.NOT_FOUND),
+    INSUFFICIENT_STOCK("재고가 부족합니다.", ErrorKind.CONFLICT);
 
     private final String message;
     private final ErrorKind kind;

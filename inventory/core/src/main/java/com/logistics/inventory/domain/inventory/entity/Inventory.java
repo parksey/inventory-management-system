@@ -1,5 +1,6 @@
 package com.logistics.inventory.domain.inventory.entity;
 
+import static com.logistics.inventory.domain.common.ErrorCode.INSUFFICIENT_STOCK;
 import static com.logistics.inventory.domain.common.ErrorCode.INVALID_QUANTITY;
 
 import com.logistics.inventory.domain.common.BaseTimeEntity;
@@ -44,12 +45,28 @@ public class Inventory extends BaseTimeEntity {
     }
 
     public StockChange increase(final Quantity amount) {
-        if (amount.value() == 0) {
-            throw BusinessException.of(INVALID_QUANTITY, "productId=%d, 요청=0".formatted(productId));
-        }
+        requirePositive(amount);
 
         final Quantity before = quantity;
         this.quantity = quantity.plus(amount);
         return new StockChange(productId, StockChangeType.INBOUND, amount, before, quantity);
+    }
+
+    public StockChange decrease(final Quantity amount) {
+        requirePositive(amount);
+        if (quantity.isLessThan(amount)) {
+            throw BusinessException.of(INSUFFICIENT_STOCK,
+                "productId=%d, 현재=%d, 요청=%d".formatted(productId, quantity.value(), amount.value()));
+        }
+
+        final Quantity before = quantity;
+        this.quantity = quantity.minus(amount);
+        return new StockChange(productId, StockChangeType.OUTBOUND, amount, before, quantity);
+    }
+
+    private void requirePositive(final Quantity amount) {
+        if (amount.value() == 0) {
+            throw BusinessException.of(INVALID_QUANTITY, "productId=%d, 요청=0".formatted(productId));
+        }
     }
 }

@@ -19,4 +19,12 @@ public record Quantity(
     public Quantity plus(final Quantity other) {
         return new Quantity(Math.addExact(value, other.value));
     }
+
+    public Quantity minus(final Quantity other) {
+        return new Quantity(value - other.value);
+    }
+
+    public boolean isLessThan(final Quantity other) {
+        return value < other.value;
+    }
 }
