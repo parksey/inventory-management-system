@@ -62,11 +62,19 @@ public class Inventory extends BaseTimeEntity {
     @Getter
     private Quantity quantity;
 
+    // 빌더는 클래스 안에서만 쓴다. 밖에서는 정적 팩토리로만 만든다
+    @Builder(access = AccessLevel.PRIVATE)
+    private Inventory(final Long productId, final Quantity quantity) {
+        this.productId = Objects.requireNonNull(productId);
+        this.quantity = quantity;
+    }
+
+    // 상품이 새로 등록될 때 함께 만드는 재고. 수량 0에서 시작한다
     public static Inventory create(final Long productId) {
-        final Inventory inventory = new Inventory();
-        inventory.productId = Objects.requireNonNull(productId);
-        inventory.quantity = Quantity.zero();
-        return inventory;
+        return Inventory.builder()
+            .productId(productId)
+            .quantity(Quantity.zero())
+            .build();
     }
 
     public StockChange increase(final Quantity amount) {
@@ -139,13 +147,11 @@ package com.logistics.inventory.domain.inventory.port;
 
 public interface InventoryStore {
 
-    Optional<Inventory> findByProductId(Long productId);
-
-    /** 재고 변경용 조회 — 다른 트랜잭션의 변경을 막는 행 잠금을 건다. */
+    /** 재고 변경용 조회 — 커밋까지 다른 트랜잭션의 변경을 막는 행 잠금을 건다. */
     Optional<Inventory> findByProductIdForUpdate(Long productId);
 
-    /** 재고 행이 없으면 수량 0으로 만든다. 동시에 호출돼도 한 건만 생긴다. */
-    void createIfAbsent(Long productId);
+    /** 새 재고를 저장한다. 이미 저장된 재고의 변경은 트랜잭션 커밋 때 변경 감지가 저장한다. */
+    void save(Inventory inventory);   // 어댑터는 persist (id를 직접 넣는 엔티티라 merge를 피한다)
 }
 ```
 
@@ -156,26 +162,53 @@ public interface ProductStore {
 
     Optional<Product> findByProductCode(ProductCode productCode);
 
-    /** 같은 상품 코드가 이미 있으면 기존 상품을, 없으면 저장한 상품을 반환한다. 동시 호출에도 한 건만 생긴다. */
-    Product saveIfAbsent(Product product);
+    /**
+     * 같은 상품 코드가 없을 때만 저장한다. 다른 트랜잭션이 넣는 중이면 그 트랜잭션이 끝날 때까지 기다린다.
+     * 이 트랜잭션이 실제로 넣었으면 true, 이미 있었으면 false.
+     */
+    boolean saveIfAbsent(Product product);   // 어댑터는 INSERT ... ON CONFLICT DO NOTHING
 }
 ```
 - 시그니처는 도메인 언어로. `JpaRepository`, `Page`, `Specification` 같은 Spring Data 타입을 노출하지 않는다.
 
 ---
 
-## 4. 서비스, Command/Result
+## 4. 서비스, 도메인 서비스, Command
 
 ```java
-public record InboundCommand(ProductCode productCode, String name, Quantity quantity, String idempotencyKey) {}
-public record OutboundCommand(ProductCode productCode, Quantity quantity, String idempotencyKey) {}
+public record InboundCommand(ProductCode productCode, Quantity quantity, RequesterId requesterId) {}
+public record OutboundCommand(ProductCode productCode, Quantity quantity, RequesterId requesterId) {}
+```
+- 상태를 바꾸는 유스케이스는 결과 record를 돌려주지 않는다(`void`). 조회만 결과 record(`StockResult`)를 돌려준다.
 
-public record StockChangeResult(Long transactionId, ProductCode productCode, String name, StockChangeType type,
-                                long quantity, long beforeQuantity, long afterQuantity,
-                                OffsetDateTime createdAt) {
-    public static StockChangeResult of(final Product product, final StockTransaction transaction) { ... }
+```java
+package com.logistics.inventory.domain.inventory;
+
+/** 상품을 찾고, 없으면 등록한다. 상품이 생기면 수량 0인 재고도 반드시 함께 생긴다. */
+@Component
+@RequiredArgsConstructor
+public class ProductRegistrar {
+
+    private final ProductStore productStore;
+    private final InventoryStore inventoryStore;
+
+    public Product getOrRegister(final ProductCode productCode) {
+        return productStore.findByProductCode(productCode).orElseGet(() -> register(productCode));
+    }
+
+    // 다른 트랜잭션이 같은 상품을 먼저 넣었으면 그쪽이 재고도 만들었으므로, 이 트랜잭션이 넣었을 때만 재고를 만든다
+    private Product register(final ProductCode productCode) {
+        final boolean created = productStore.saveIfAbsent(Product.register(productCode));
+        final Product product = productStore.findByProductCode(productCode).orElseThrow();
+        if (created) {
+            inventoryStore.save(Inventory.create(product.getId()));
+        }
+        return product;
+    }
 }
 ```
+- "A가 생기면 B도 생긴다"는 규칙을 이름 있는 도메인 서비스로 둔다. 상품을 만드는 길이 이것 하나라 재고가 빠지지 않는다.
+- `persist`한 재고는 바로 다음 잠금 조회 전에 Hibernate가 INSERT한다(`FlushMode.AUTO`).
 
 ```java
 package com.logistics.inventory.domain.inventory;
@@ -184,47 +217,41 @@ package com.logistics.inventory.domain.inventory;
 @RequiredArgsConstructor
 public class InventoryService {
 
+    private final ProductRegistrar productRegistrar;
     private final ProductStore productStore;
     private final InventoryStore inventoryStore;
     private final StockTransactionStore stockTransactionStore;
 
     @Transactional
-    public StockChangeResult inbound(final InboundCommand command) {
-        // 상품 (Product)
-        final Product product = productStore.saveIfAbsent(Product.register(command.productCode(), command.name()));
-        // 재고 (Inventory) — 행 보장 후 잠금, 증가
-        inventoryStore.createIfAbsent(product.getId());
-        final Inventory inventory = getForUpdate(product.getId());
-        final StockChange change = inventory.increase(command.quantity());   // 규칙은 엔티티가
+    public void inbound(final InboundCommand command) {
+        // 상품 (Product) — 없으면 수량 0인 재고와 함께 등록
+        final Product product = productRegistrar.getOrRegister(command.productCode());
+        // 재고 (Inventory) — 행 잠금 후 증가
+        final StockChange change = getForUpdate(product.getId()).increase(command.quantity());   // 규칙은 엔티티가
         // 원장 (StockTransaction)
-        final StockTransaction transaction =
-                stockTransactionStore.save(StockTransaction.record(change, command.idempotencyKey()));
-        return StockChangeResult.of(product, transaction);
+        stockTransactionStore.save(StockTransaction.record(change, command.requesterId()));
     }
 
     @Transactional
-    public StockChangeResult outbound(final OutboundCommand command) {
+    public void outbound(final OutboundCommand command) {
         // 상품 (Product)
         final Product product = productStore.findByProductCode(command.productCode())
                 .orElseThrow(() -> BusinessException.of(PRODUCT_NOT_FOUND, "productCode=" + command.productCode().value()));
         // 재고 (Inventory) — 행 잠금 후 감소
-        final Inventory inventory = getForUpdate(product.getId());
-        final StockChange change = inventory.decrease(command.quantity());
+        final StockChange change = getForUpdate(product.getId()).decrease(command.quantity());
         // 원장 (StockTransaction)
-        final StockTransaction transaction =
-                stockTransactionStore.save(StockTransaction.record(change, command.idempotencyKey()));
-        return StockChangeResult.of(product, transaction);
+        stockTransactionStore.save(StockTransaction.record(change, command.requesterId()));
     }
 
+    // 입고와 출고가 함께 쓴다. 상품이 있는데 재고 행이 없으면 데이터 손상 → 비즈니스 예외가 아니라 500
     private Inventory getForUpdate(final Long productId) {
         return inventoryStore.findByProductIdForUpdate(productId)
-                // 상품이 있는데 재고 행이 없으면 데이터 손상 → 비즈니스 예외가 아니라 500
-                .orElseThrow(() -> new IllegalStateException("재고 행이 없습니다. productId=" + productId));
+                .orElseThrow(() -> new IllegalStateException("상품은 있는데 재고 행이 없습니다. productId=" + productId));
     }
 }
 ```
 - 서비스에는 `if (재고 < 요청)` 같은 규칙 판단이 없다. 조회 → 엔티티 행위 → 기록 흐름만 있다.
-- 재고 변경과 원장 기록이 한 트랜잭션. 변경된 `Inventory`는 변경 감지로 저장된다.
+- 재고 변경과 원장 기록이 한 트랜잭션. 변경된 `Inventory`는 `save`를 부르지 않고 변경 감지로 저장된다.
 
 ---
 

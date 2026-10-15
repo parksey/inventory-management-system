@@ -10,17 +10,8 @@ package com.logistics.inventory.db.inventory;
 interface InventoryJpaRepository extends JpaRepository<Inventory, Long> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "3000"))   // ⚠ PG에서 무시될 수 있음 — 아래 참고
     @Query("select i from Inventory i where i.productId = :productId")
     Optional<Inventory> findByProductIdForUpdate(@Param("productId") Long productId);
-
-    @Modifying
-    @Query(value = """
-            INSERT INTO inventory (product_id, quantity, created_at, updated_at)
-            VALUES (:productId, 0, now(), now())
-            ON CONFLICT (product_id) DO NOTHING
-            """, nativeQuery = true)
-    void insertIfAbsent(@Param("productId") Long productId);
 }
 ```
 
@@ -30,20 +21,49 @@ interface InventoryJpaRepository extends JpaRepository<Inventory, Long> {
 class InventoryStoreAdapter implements InventoryStore {
 
     private final InventoryJpaRepository inventoryJpaRepository;
-
-    @Override
-    public Optional<Inventory> findByProductId(final Long productId) {
-        return inventoryJpaRepository.findById(productId);
-    }
+    private final EntityManager entityManager;
 
     @Override
     public Optional<Inventory> findByProductIdForUpdate(final Long productId) {
         return inventoryJpaRepository.findByProductIdForUpdate(productId);
     }
 
+    // id(productId)를 직접 넣는 엔티티라 JpaRepository.save는 merge로 동작한다 (SELECT가 한 번 더 나가고, 넘긴 객체가 영속 상태가 되지 않는다)
     @Override
-    public void createIfAbsent(final Long productId) {
-        inventoryJpaRepository.insertIfAbsent(productId);
+    public void save(final Inventory inventory) {
+        entityManager.persist(inventory);
+    }
+}
+```
+
+```java
+package com.logistics.inventory.db.product;
+
+interface ProductJpaRepository extends JpaRepository<Product, Long> {
+
+    Optional<Product> findByProductCodeValue(String productCode);
+
+    // 같은 코드가 이미 있으면(다른 트랜잭션이 넣는 중이면 커밋을 기다린 뒤) 오류 없이 넣지 않는다. 넣은 행 수(0 또는 1)를 돌려준다
+    @Modifying
+    @Query(value = """
+            INSERT INTO product (product_code, name)
+            VALUES (:productCode, :name)
+            ON CONFLICT (product_code) DO NOTHING
+            """, nativeQuery = true)
+    int insertIfAbsent(@Param("productCode") String productCode, @Param("name") String name);
+}
+
+@Repository
+@RequiredArgsConstructor
+class ProductStoreAdapter implements ProductStore {
+
+    private static final int INSERTED = 1;   // ON CONFLICT DO NOTHING이 실제로 넣었을 때의 행 수
+
+    private final ProductJpaRepository productJpaRepository;
+
+    @Override
+    public boolean saveIfAbsent(final Product product) {
+        return productJpaRepository.insertIfAbsent(product.getProductCode().value(), product.getName()) == INSERTED;
     }
 }
 ```
@@ -57,7 +77,8 @@ package com.logistics.inventory.db.config;
 class JpaConfig {}
 ```
 - Spring Data 인터페이스와 Adapter는 package-private — db 밖에서는 도메인 인터페이스로만 접근된다.
-- 락 대기 시간 상한을 둬서 경합 시 무한 대기하지 않게 한다. PostgreSQL에는 `FOR UPDATE WAIT n` 문법이 없어 Hibernate가 `lock.timeout` 힌트를 무시할 수 있다 → 적용 여부를 테스트로 확인하고, 안 되면 `SET LOCAL lock_timeout` 또는 커넥션 옵션(`options=-c lock_timeout=3000`)으로 건다.
+- `@Modifying` 쿼리는 `void`, `int`, `long`만 돌려줄 수 있다. 행 수를 도메인 의미(`boolean`)로 바꾸는 일은 어댑터가 한다.
+- 잠금 대기 상한은 `inventory-db.yml`의 커넥션 초기화로 건다: `spring.datasource.hikari.connection-init-sql: SET lock_timeout = '3s'`. PostgreSQL에는 `FOR UPDATE WAIT n` 문법이 없어 `jakarta.persistence.lock.timeout` 힌트에 기대지 않고, 커넥션 설정은 행 잠금과 유니크 인덱스 대기 모두에 적용된다.
 
 ---
 
@@ -66,53 +87,42 @@ class JpaConfig {}
 ```java
 package com.logistics.inventory.api.inventory;
 
+// 유스케이스마다 컨트롤러를 둔다. 조회는 InventoryController, 출고는 OutboundController
 @RestController
 @RequestMapping("/v1/inventory")   // /api는 server.servlet.context-path가 붙인다
 @RequiredArgsConstructor
-public class InventoryController {
+public class InboundController {
 
     private final InventoryService inventoryService;
 
-    @PostMapping("/inbound")
-    public ApiResponse<StockChangeResponse> inbound(
-            @RequestHeader(value = "Idempotency-Key", required = false) final String idempotencyKey,
+    @PostMapping("/{productCode}/inbound")
+    public ApiResponse<Void> inbound(
+            @PathVariable final String productCode,
+            @RequestHeader(ApiHeaders.REQUESTER_ID) final String requesterId,   // 형식은 RequesterId가 검증
             @Valid @RequestBody final InboundRequest request
     ) {
-        return ApiResponse.ok(StockChangeResponse.from(inventoryService.inbound(request.toCommand(idempotencyKey))));   // 성공 응답도 공통 응답으로 감싼다
+        inventoryService.inbound(request.toCommand(productCode, requesterId));
+        return ApiResponse.ok(null);   // 상태를 바꾸는 요청은 데이터를 돌려주지 않는다
     }
 }
 ```
 
 ```java
 public record InboundRequest(
-        @NotBlank String productCode,
-        @NotBlank String name,
-        @NotNull @Positive Long quantity
+    @NotNull @Positive @Max(1_000_000) Long quantity
 ) {
 
-    public InboundCommand toCommand(final String idempotencyKey) {
+    public InboundCommand toCommand(final String productCode, final String requesterId) {
         return new InboundCommand(
-                new ProductCode(productCode), 
-                name, 
-                new Quantity(quantity), 
-                idempotencyKey
+            new ProductCode(productCode),
+            new Quantity(quantity),
+            new RequesterId(requesterId)
         );
     }
 }
-
-public record StockChangeResponse(
-        Long transactionId,
-        String productCode,
-        String name,
-        String type,
-        long quantity,
-        long beforeQuantity,
-        long afterQuantity,
-        OffsetDateTime createdAt
-) {
-    public static StockChangeResponse from(final StockChangeResult result) { ... }
-}
 ```
+- 여러 API가 함께 쓰는 헤더 이름은 `app`의 `ApiHeaders`에 둔다 (`REQUESTER_ID = "X-User-Id"`). 테스트는 계약을 지키려고 헤더 이름을 문자열 리터럴로 쓴다.
+- 조회 응답은 `XxxResponse.from(result)` record로 만든다 (`StockResponse`).
 
 ```java
 @SpringBootApplication(scanBasePackages = "com.logistics.inventory")   // domain, db 빈까지 스캔
