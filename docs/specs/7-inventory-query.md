@@ -22,21 +22,22 @@ CREATE TABLE product (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     product_code  VARCHAR(64)  NOT NULL,
     name          VARCHAR(200) NOT NULL,
-    created_at    TIMESTAMPTZ  NOT NULL,
-    updated_at    TIMESTAMPTZ  NOT NULL,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ,
     CONSTRAINT uk_product_product_code UNIQUE (product_code)
 );
 
 CREATE TABLE inventory (
     product_id  BIGINT      PRIMARY KEY REFERENCES product (id),
     quantity    BIGINT      NOT NULL DEFAULT 0,
-    created_at  TIMESTAMPTZ NOT NULL,
-    updated_at  TIMESTAMPTZ NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ,
     CONSTRAINT ck_inventory_quantity_non_negative CHECK (quantity >= 0)
 );
 ```
 - 내부 참조는 `product.id`(BIGINT), 외부 식별은 `product_code`. `product_code`는 API로만 노출하고 `id`는 노출하지 않는다.
 - `inventory`의 PK가 `product_id`라서 상품 하나에 재고 행은 하나뿐이다.
+- `created_at`은 생성 때, `updated_at`은 수정 때만 채운다. 생성 직후 `updated_at`은 NULL이라 한 번도 바뀌지 않은 행을 구분할 수 있다. `created_at`의 `DEFAULT now()`는 SQL로 직접 넣는 데이터용이고, 앱은 `BaseTimeEntity`가 값을 넣는다.
 - 상품 코드는 전체에서 고유하다(`UNIQUE (product_code)`). 여러 회사(테넌트)가 같은 창고를 쓰면 회사마다 같은 코드를 붙일 수 있지만, 테넌트 구분은 이 이슈 범위 밖이라 한 회사 기준으로 만든다. 테넌트를 도입할 때는 `tenant_id`를 추가하고 UNIQUE를 `(tenant_id, product_code)`로 바꾼다.
 
 **왜 두 테이블로 나누나** (대안: `product`에 `quantity` 컬럼을 두는 한 테이블)
@@ -71,7 +72,8 @@ CREATE TABLE inventory (
 | `inventory` | `Inventory` (엔티티) | `Inventory.create(productId)`. `Product`는 객체가 아니라 `productId`로 참조 |
 | `inventory` | `InventoryRepository` | `findByProductId(Long)` |
 | `inventory` | `InventoryService` | `getStock(ProductCode)` → `StockResult(productCode, name, quantity)` |
-| `common` | `BaseTimeEntity`, `BusinessException`, `ErrorCode`, `ErrorKind` | 생성, 수정 시각과 비즈니스 예외 |
+| `common` | `BaseTimeEntity` | `@MappedSuperclass`. `@PrePersist`에서 `createdAt`만, `@PreUpdate`에서 `updatedAt`만 채운다. `Product`, `Inventory`가 상속 |
+| `common` | `BusinessException`, `ErrorCode`, `ErrorKind` | 비즈니스 예외 |
 
 `ErrorCode`: `INVALID_PRODUCT_CODE`(INVALID), `INVALID_PRODUCT_NAME`(INVALID), `INVALID_QUANTITY`(INVALID), `PRODUCT_NOT_FOUND`(NOT_FOUND). 입고, 출고에 필요한 값은 그 이슈에서 추가한다.
 
@@ -135,10 +137,10 @@ CREATE TABLE inventory (
 ### PR 계획
 | PR | 브랜치 | 범위 | 포함 테스트 케이스 |
 |---|---|---|---|
-| 1 | `feat/7-inventory-schema` | 명세서, 스키마 마이그레이션, 도메인 모델(VO, 엔티티, 예외), 아키텍처 규칙의 SKU 표기를 productCode로 변경 (`Refs #7`) | TC-7-01 ~ TC-7-10 |
-| 2 | `feat/7-inventory-api` | Repository와 Adapter, 조회 서비스, 조회 API, 404/400 응답 (`Closes #7`) | TC-7-11 ~ TC-7-13 |
+| 1 | `feat/7-inventory-schema` | 명세서, 스키마 마이그레이션(`V7_1`), DB 제약 테스트 (`Refs #7`) | TC-7-08 ~ TC-7-10 |
+| 2 | `feat/7-inventory-query` | 도메인 모델(VO, 엔티티, `BaseTimeEntity`, 예외), Repository와 Adapter, 조회 서비스, 조회 API, 404/400 응답, 아키텍처 규칙의 SKU 표기를 productCode로 변경 (`Closes #7`) | TC-7-01 ~ TC-7-07, TC-7-11 ~ TC-7-13 |
 
-- 나누는 이유: PR 1만 머지돼도 노출되는 기능이 없어 단독으로 머지할 수 있다. 리뷰도 "데이터 구조와 도메인 규칙이 맞나"와 "API 계약이 맞나"를 따로 본다.
+- 나누는 이유: 스키마는 앱 코드 없이 SQL만으로 완결되고, DB 제약을 SQL로 직접 검증할 수 있다. PR 1만 머지돼도 노출되는 기능이 없어 단독으로 머지할 수 있다. 리뷰도 "테이블과 제약이 맞나"와 "도메인 규칙과 API 계약이 맞나"를 따로 본다.
 
 ### 결정 필요
 - 상품 코드 형식(R1): 영문 대문자, 숫자, 하이픈, 1~64자로 제안. 다른 기준이 있으면 알려 주세요.
@@ -148,3 +150,4 @@ CREATE TABLE inventory (
 - 설계 결정마다 이유와 비교한 대안을 추가 (승인 전 보완)
 - 두 테이블로 나누는 이유를 장점(간섭 없음, 확장 범위)과 비용으로 다시 정리 (승인 전 보완)
 - 상품 코드는 전체 고유로 두고 테넌트별 고유는 범위 밖으로 명시, SKU 용어 설명 제거 (승인 전 보완)
+- PR을 스키마와 기능(도메인 + API)으로 다시 나누고, `updated_at`은 수정 때만 채우도록 변경 (승인 전 보완)
