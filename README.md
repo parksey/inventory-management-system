@@ -12,8 +12,8 @@ Java 21 · Spring Boot · Spring Data JPA · PostgreSQL · Flyway · Gradle(Kotl
 | 모듈 | 역할 |
 |---|---|
 | `app` | 실행 모듈. 도메인 조립, Controller, 요청과 응답 DTO, 예외 응답 |
-| `inventory/core` | 엔티티, VO, Repository 인터페이스, 서비스 |
-| `inventory/db` | Repository 구현 (JPA, native query) |
+| `inventory/core` | 엔티티, VO, Store(저장 포트) 인터페이스, 서비스 |
+| `inventory/db` | Store 구현 (JPA, native query) |
 | `inventory/schema` | 재고 도메인 테이블 마이그레이션 SQL |
 | `support/flyway` | Flyway 실행 설정, 공용 기초 데이터 |
 | `support/p6spy` | 로컬 SQL 로깅 (운영에서는 꺼짐) |

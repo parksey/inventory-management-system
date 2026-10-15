@@ -161,6 +161,9 @@ spring:
   jpa:
     open-in-view: false
   # flyway는 Boot 기본값(켜짐) — 토글을 두지 않는다
+server:
+  servlet:
+    context-path: /api          # 컨트롤러는 /v1/... 만 쓴다. actuator, Swagger도 /api 아래 (헬스 체크 /api/actuator/health)
 ---
 # application-prod.yml
 decorator:

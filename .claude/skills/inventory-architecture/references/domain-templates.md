@@ -5,7 +5,7 @@
 ## 1. VO(record)
 
 ```java
-package com.logistics.inventory.domain.inventory;
+package com.logistics.inventory.domain.inventory.entity;
 
 @Embeddable
 public record Quantity(long value) {
@@ -45,7 +45,7 @@ public record Quantity(long value) {
 ## 2. 엔티티
 
 ```java
-package com.logistics.inventory.domain.inventory;
+package com.logistics.inventory.domain.inventory.entity;
 
 @Entity
 @Table(name = "inventory")
@@ -132,12 +132,12 @@ public abstract class BaseTimeEntity {
 
 ---
 
-## 3. Repository 인터페이스
+## 3. Store 인터페이스
 
 ```java
-package com.logistics.inventory.domain.inventory;
+package com.logistics.inventory.domain.inventory.port;
 
-public interface InventoryRepository {
+public interface InventoryStore {
 
     Optional<Inventory> findByProductId(Long productId);
 
@@ -150,9 +150,9 @@ public interface InventoryRepository {
 ```
 
 ```java
-package com.logistics.inventory.domain.product;
+package com.logistics.inventory.domain.product.port;
 
-public interface ProductRepository {
+public interface ProductStore {
 
     Optional<Product> findByProductCode(ProductCode productCode);
 
@@ -184,40 +184,40 @@ package com.logistics.inventory.domain.inventory;
 @RequiredArgsConstructor
 public class InventoryService {
 
-    private final ProductRepository productRepository;
-    private final InventoryRepository inventoryRepository;
-    private final StockTransactionRepository stockTransactionRepository;
+    private final ProductStore productStore;
+    private final InventoryStore inventoryStore;
+    private final StockTransactionStore stockTransactionStore;
 
     @Transactional
     public StockChangeResult inbound(final InboundCommand command) {
         // 상품 (Product)
-        final Product product = productRepository.saveIfAbsent(Product.register(command.productCode(), command.name()));
+        final Product product = productStore.saveIfAbsent(Product.register(command.productCode(), command.name()));
         // 재고 (Inventory) — 행 보장 후 잠금, 증가
-        inventoryRepository.createIfAbsent(product.getId());
+        inventoryStore.createIfAbsent(product.getId());
         final Inventory inventory = getForUpdate(product.getId());
         final StockChange change = inventory.increase(command.quantity());   // 규칙은 엔티티가
         // 원장 (StockTransaction)
         final StockTransaction transaction =
-                stockTransactionRepository.save(StockTransaction.record(change, command.idempotencyKey()));
+                stockTransactionStore.save(StockTransaction.record(change, command.idempotencyKey()));
         return StockChangeResult.of(product, transaction);
     }
 
     @Transactional
     public StockChangeResult outbound(final OutboundCommand command) {
         // 상품 (Product)
-        final Product product = productRepository.findByProductCode(command.productCode())
+        final Product product = productStore.findByProductCode(command.productCode())
                 .orElseThrow(() -> BusinessException.of(PRODUCT_NOT_FOUND, "productCode=" + command.productCode().value()));
         // 재고 (Inventory) — 행 잠금 후 감소
         final Inventory inventory = getForUpdate(product.getId());
         final StockChange change = inventory.decrease(command.quantity());
         // 원장 (StockTransaction)
         final StockTransaction transaction =
-                stockTransactionRepository.save(StockTransaction.record(change, command.idempotencyKey()));
+                stockTransactionStore.save(StockTransaction.record(change, command.idempotencyKey()));
         return StockChangeResult.of(product, transaction);
     }
 
     private Inventory getForUpdate(final Long productId) {
-        return inventoryRepository.findByProductIdForUpdate(productId)
+        return inventoryStore.findByProductIdForUpdate(productId)
                 // 상품이 있는데 재고 행이 없으면 데이터 손상 → 비즈니스 예외가 아니라 500
                 .orElseThrow(() -> new IllegalStateException("재고 행이 없습니다. productId=" + productId));
     }

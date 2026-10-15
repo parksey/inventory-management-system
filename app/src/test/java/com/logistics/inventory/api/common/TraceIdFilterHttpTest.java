@@ -25,7 +25,7 @@ class TraceIdFilterHttpTest {
     @DisplayName("TC-1-19 실제 요청의 X-Request-Id를 응답 헤더로 돌려준다")
     void 실제_요청_헤더_이어쓰기() {
         final ResponseEntity<Void> response = RestClient.create("http://localhost:" + port)
-                .get().uri("/actuator/health")
+                .get().uri("/api/actuator/health")
                 .header(TRACE_HEADER, "demo-trace-001")
                 .retrieve()
                 .toBodilessEntity();
