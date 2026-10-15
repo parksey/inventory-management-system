@@ -90,7 +90,7 @@ support/flyway/    src/main/resources/db/migration/   공용 기초 데이터 (�
 support/p6spy/     com.logistics.inventory.p6spy   PrettySqlFormatter, autoconfigure/P6SpyFormatterAutoConfiguration
 app/               com.logistics.inventory.api
   ├─ inventory/      InventoryController, *Request, *Response
-  ├─ common/         GlobalExceptionHandler, ErrorStatusMapper(ErrorKind → HttpStatus), ApiErrorCode
+  ├─ common/         GlobalExceptionHandler, ErrorStatusMapper(ErrorKind → HttpStatus), ApiResponse
   ├─ InventoryApplication (scanBasePackages = "com.logistics.inventory")
   └─ resources/      application.yml, application-local.yml, application-prod.yml
 ```
@@ -222,7 +222,7 @@ Pod가 여러 개 떠 있으므로 **한 JVM 안에서만 유효한 수단은 �
 - `ErrorCode`(domain)는 enum 하나다. 각 값은 기본 메시지와 **종류**(`ErrorKind`: INVALID / NOT_FOUND / CONFLICT / UNPROCESSABLE)를 가진다. **상수 이름이 곧 응답 code**다(`INSUFFICIENT_STOCK`) — 번호를 따로 두지 않는다. 중복을 사람이 아니라 컴파일러가 막게 하기 위해서다. 이름에는 도메인 명사를 넣는다(`PRODUCT_NOT_FOUND`). 도메인이 늘어 enum을 나눠야 할 때 인터페이스로 뽑는다.
 - **HTTP 상태는 모른다** — 도메인은 웹을 모른다. 종류는 enum이 정하고, 던지는 쪽이 고르지 않는다 (같은 code가 경로마다 다른 상태로 나가면 클라이언트가 분기할 수 없다).
 - 예외 메시지에는 원인을 추적할 식별자와 값을 넣는다. `of(code, detail)`이 기본 문구를 앞에 붙인다 (`"재고가 부족합니다. productId=1, 현재=3, 요청=5"`).
-- `app`의 `GlobalExceptionHandler`가 `ErrorKind` → HTTP 상태로 매핑해 `ProblemDetail`(RFC 9457) + 확장 필드 `code`로 응답한다. 도메인 밖 오류(형식 검증, 경로, 락 대기 초과, 500)는 app의 `ApiErrorCode`를 쓴다.
+- 모든 응답(성공, 에러)은 `app`의 공통 응답 `ApiResponse`(`status`, `code`, `message`, `data`)로 내린다. 성공은 Controller가 `ApiResponse.ok(response)`로 감싸고 `code`는 `SUCCESS`다. 에러는 `GlobalExceptionHandler`가 `ErrorKind` → HTTP 상태로 매핑해 `code`에 `ErrorCode` 상수 이름을 담는다. 도메인 밖 오류(형식 검증, 경로, 락 대기 초과, 500)는 enum을 두지 않고 HTTP 상태 이름(`NOT_FOUND`)과 상태 문구를 code, message로 쓴다. 검증 실패의 틀린 항목은 `data`에 `[{field, reason}]`로 담는다.
 - 상수 이름 변경은 외부 계약 변경이다. API 테스트는 `$.code`를 **문자열 리터럴**로 검증해 의도치 않은 rename을 잡는다 (enum 상수를 참조하면 IDE rename에 같이 바뀐다).
 - 도메인 테스트는 메시지가 아니라 `errorCode`로 검증한다.
 - 예상하지 못한 예외는 500으로 응답하되 스택트레이스·SQL 등 내부 정보를 응답에 담지 않는다.

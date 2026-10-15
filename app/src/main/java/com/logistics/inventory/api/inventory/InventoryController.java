@@ -1,5 +1,6 @@
 package com.logistics.inventory.api.inventory;
 
+import com.logistics.inventory.api.common.ApiResponse;
 import com.logistics.inventory.domain.inventory.InventoryService;
 import com.logistics.inventory.domain.product.entity.ProductCode;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +17,7 @@ public class InventoryController {
     private final InventoryService inventoryService;
 
     @GetMapping("/{productCode}")
-    public StockResponse getStock(@PathVariable final String productCode) {
-        return StockResponse.from(inventoryService.getStock(new ProductCode(productCode)));
+    public ApiResponse<StockResponse> getStock(@PathVariable final String productCode) {
+        return ApiResponse.ok(StockResponse.from(inventoryService.getStock(new ProductCode(productCode))));
     }
 }
