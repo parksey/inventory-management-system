@@ -127,7 +127,7 @@ public class InventoryApplication {
 
 ## 3. api — 예외 핸들러
 
-세부(표준 예외별 매핑, 응답 필드, 로그 정책)는 `.pm-plans/tasks/05-error-response.md`. 여기서는 모양만.
+여기서는 모양만 둔다. 세부 매핑은 에러 응답 이슈의 명세서에서 정한다.
 
 ```java
 package com.logistics.inventory.api.common;

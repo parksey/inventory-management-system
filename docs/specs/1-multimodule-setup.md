@@ -53,7 +53,7 @@
 | 항목 | local (기본) | prod | test |
 |---|---|---|---|
 | DataSource | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` (기본값은 로컬 compose) | 같은 환경 변수, **기본값 없음** — 빠지면 기동 실패 | Testcontainers `@ServiceConnection` |
-| Flyway | 앱 기동 시 실행 (Boot 기본값) | 같음. Helm 차트(#14)를 도입할 때 prod만 끄고 hook Job으로 옮긴다 | 같음 |
+| Flyway | 앱 기동 시 실행 (Boot 기본값) | 같음. 마이그레이션을 별도 Job으로 분리할 때 prod만 끈다 | 같음 |
 | `ddl-auto` | validate | validate | validate |
 | p6spy (`decorator.datasource.enabled`) | true, 정렬된 SQL 로그 출력 | false (DataSource 래핑 자체를 끔) | true, SQL 로그 끔 |
 | Swagger (springdoc) | 켜짐 | 꺼짐 | 켜짐 |
@@ -86,7 +86,7 @@
 | 상황 | 결과 |
 |---|---|
 | DB에 연결할 수 없음 | 기동 실패 (Hikari `connection-timeout` 3초) |
-| 마이그레이션 파일이 없음 (#3 이전) | 정상. Flyway가 "No migrations found"를 로그로 남기고 기동 |
+| 마이그레이션 파일이 없음 (스키마 이슈 이전) | 정상. Flyway가 "No migrations found"를 로그로 남기고 기동 |
 | 엔티티가 없음 | 정상. `ddl-auto=validate`가 검증할 대상이 없다 |
 
 ### 테스트 케이스
@@ -138,4 +138,4 @@
 - 2026-10-15: Flyway 테스트를 PostgreSQL 실제 적용(TC-1-14) 하나로 줄임 (location, clean 금지, 비활성 등은 Boot 기본 동작 검증이라 제외), traceId TC를 TC-1-15 ~ 19로 당김, domain의 spring-context와 spring-tx는 코드가 생기는 첫 서비스 이슈로 미룸
 - 2026-10-15: R1 health 확인과 R9 응답 헤더 확인을 수동 curl에서 HTTP 통합 테스트로 옮김. TC-1-01은 DataSource 직접 확인 대신 health HTTP 확인으로 바꾸고(기동 성공이 곧 DB 연결), R9 응답 헤더는 TC-1-19로 추가
 - 2026-10-15: p6spy 모듈과 전역 MDC(traceId) 로깅을 범위에 추가하고 PR을 3개로 나눔 (로그 형식은 이후 기능 이슈가 모두 쓰는 기반이라 초기 세팅에 포함)
-- 2026-10-15: 프로파일을 local(기본)과 prod(명시)로 변경, 마이그레이션은 Helm 도입(#14) 전까지 모든 프로파일에서 앱 기동 시 실행, DataSource와 JPA 설정을 db 모듈 `inventory-db.yml`로 이동, db → domain을 compileOnly로 변경, prod에서 Swagger 끔, api의 spring-tx는 #5로 미룸
+- 2026-10-15: 프로파일을 local(기본)과 prod(명시)로 변경, 마이그레이션은 모든 프로파일에서 앱 기동 시 실행, DataSource와 JPA 설정을 db 모듈 `inventory-db.yml`로 이동, db → domain을 compileOnly로 변경, prod에서 Swagger 끔, api의 spring-tx는 에러 응답 이슈로 미룸

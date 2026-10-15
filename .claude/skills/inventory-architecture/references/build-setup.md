@@ -80,7 +80,7 @@ dependencies {
     runtimeOnly(project(":support:flyway"))     // 현재 모든 프로파일에서 앱 기동 시 마이그레이션 (Helm 도입 시 prod만 끈다)
     runtimeOnly(project(":support:p6spy"))      // 활성 여부는 decorator.datasource.enabled로 프로파일별 제어
     implementation("org.springframework.boot:spring-boot-starter-webmvc")   // Boot 4에서 starter-web의 새 이름
-    implementation("org.springframework:spring-tx")   // (#5 에러 응답에서 추가) 락 타임아웃 등 org.springframework.dao 예외를 핸들러에서 잡기 위해 (DB 구현은 모름)
+    implementation("org.springframework:spring-tx")   // (에러 응답 이슈에서 추가) 락 타임아웃 등 org.springframework.dao 예외를 핸들러에서 잡기 위해 (DB 구현은 모름)
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
