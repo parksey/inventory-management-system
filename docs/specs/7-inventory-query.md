@@ -1,0 +1,124 @@
+# 기능 명세 — 상품 재고 조회 (#7)
+
+### 요구사항 해석
+- 상품 코드로 상품 하나의 현재 재고(상품 코드, 상품명, 수량)를 조회하는 API를 만든다.
+- 상품과 재고를 저장하는 테이블을 이 이슈에서 만든다. 입고, 출고 이슈가 이 테이블 위에서 동작한다.
+- 같은 상품 코드의 상품은 하나만, 재고 수량은 0 이상만 저장된다. 앱 검증과 별개로 DB 제약으로도 막는다. 여러 Pod가 동시에 쓰거나 앱에 버그가 있어도 잘못된 데이터가 남지 않게 하기 위해서다.
+- 상품 등록 API는 없다(상품은 입고 때 생긴다). 이 이슈의 테스트 데이터는 SQL로 넣는다.
+
+**용어**
+| 용어 | 뜻 |
+|---|---|
+| 상품 코드 (`productCode`) | 재고를 따로 세는 단위마다 붙이는 상품의 고유 코드. 업계에서 SKU(Stock Keeping Unit)라 부르는 것. 같은 티셔츠라도 색, 사이즈가 다르면 코드가 다르다. 예: `TS-BASIC-BLK-M` |
+| 상품 (`Product`) | 상품 코드와 상품명. 거의 바뀌지 않는다 |
+| 재고 (`Inventory`) | 상품 하나의 현재 수량. 입고, 출고 때마다 바뀐다 |
+
+이슈 본문의 "SKU"는 코드와 문서에서 `productCode`(상품 코드)로 부른다. SKU는 물류 밖에서는 낯선 용어라 이름만 보고 뜻을 알 수 있게 하기 위해서다.
+
+### 설계
+
+**데이터** — 상품과 재고를 1:1 두 테이블로 나눈다 (`V7_1__create_product_inventory.sql`)
+
+```sql
+CREATE TABLE product (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    product_code  VARCHAR(64)  NOT NULL,
+    name          VARCHAR(200) NOT NULL,
+    created_at    TIMESTAMPTZ  NOT NULL,
+    updated_at    TIMESTAMPTZ  NOT NULL,
+    CONSTRAINT uk_product_product_code UNIQUE (product_code)
+);
+
+CREATE TABLE inventory (
+    product_id  BIGINT      PRIMARY KEY REFERENCES product (id),
+    quantity    BIGINT      NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL,
+    CONSTRAINT ck_inventory_quantity_non_negative CHECK (quantity >= 0)
+);
+```
+- 내부 참조는 `product.id`(BIGINT), 외부 식별은 `product_code`. `product_code`는 API로만 노출하고 `id`는 노출하지 않는다.
+- `inventory`의 PK가 `product_id`라서 상품 하나에 재고 행은 하나뿐이다.
+
+**도메인** (`inventory-domain`)
+| 패키지 | 클래스 | 역할 |
+|---|---|---|
+| `product` | `ProductCode` (VO, record) | 형식 검증 (R1) |
+| `product` | `Product` (엔티티) | `Product.register(productCode, name)`, 상품명 검증 (R2) |
+| `product` | `ProductRepository` | `findByProductCode(ProductCode)` |
+| `inventory` | `Quantity` (VO, record) | 0 이상 검증 (R3) |
+| `inventory` | `Inventory` (엔티티) | `Inventory.create(productId)`. `Product`는 객체가 아니라 `productId`로 참조 |
+| `inventory` | `InventoryRepository` | `findByProductId(Long)` |
+| `inventory` | `InventoryService` | `getStock(ProductCode)` → `StockResult(productCode, name, quantity)` |
+| `common` | `BaseTimeEntity`, `BusinessException`, `ErrorCode`, `ErrorKind` | 생성, 수정 시각과 비즈니스 예외 |
+
+`ErrorCode`: `INVALID_PRODUCT_CODE`(INVALID), `INVALID_PRODUCT_NAME`(INVALID), `INVALID_QUANTITY`(INVALID), `PRODUCT_NOT_FOUND`(NOT_FOUND). 입고, 출고에 필요한 값은 그 이슈에서 추가한다.
+
+**db** (`inventory-db`): `ProductJpaRepository`, `ProductRepositoryAdapter`, `InventoryJpaRepository`, `InventoryRepositoryAdapter` (package-private)
+
+**API** (`app/api`)
+
+`GET /api/v1/inventory/{productCode}`
+
+| 상황 | 상태 | 본문 |
+|---|---|---|
+| 등록된 상품 | 200 | `{"productCode": "TS-BASIC-BLK-M", "name": "베이직 반팔 티셔츠 검정 M", "quantity": 5}` |
+| 없는 상품 | 404 | `ProblemDetail` + `"code": "PRODUCT_NOT_FOUND"` |
+| 형식이 틀린 코드 | 400 | `ProblemDetail` + `"code": "INVALID_PRODUCT_CODE"` |
+
+- `GlobalExceptionHandler`는 `BusinessException`만 처리한다. `ErrorKind` → HTTP 상태 매핑(`ErrorStatusMapper`)은 4종을 모두 둔다 (`default` 없는 switch라 하나라도 빠지면 컴파일 에러).
+- 표준 MVC 예외, 락 대기 초과, 500 응답 형식은 공통 에러 응답 이슈 범위라 여기서는 다루지 않는다.
+
+**흐름**: `@Transactional(readOnly = true)` 안에서 상품 코드로 상품 조회 → 없으면 `PRODUCT_NOT_FOUND` → 상품 id로 재고 조회 → 응답. 조회만 하므로 락은 걸지 않는다.
+
+### 비즈니스 규칙
+- R1. 상품 코드는 영문 대문자, 숫자, 하이픈으로 된 1~64자다. 소문자를 대문자로 바꿔 주지 않고 거절한다.
+- R2. 상품명은 비어 있지 않은 200자 이하다.
+- R3. 재고 수량은 0 이상이다.
+- R4. 같은 상품 코드의 상품은 DB에 하나만 저장된다.
+- R5. 재고 수량이 음수인 행은 DB에 저장되지 않는다.
+- R6. 재고 행은 존재하는 상품에만 생긴다.
+- R7. 등록된 상품 코드로 조회하면 상품 코드, 상품명, 현재 수량을 돌려준다.
+- R8. 등록되지 않은 상품 코드로 조회하면 404 `PRODUCT_NOT_FOUND`를 돌려준다.
+
+### 예외 케이스
+| 상황 | 결과 |
+|---|---|
+| 상품 코드 형식이 틀림 (소문자, 공백, 65자 이상) | 400 `INVALID_PRODUCT_CODE` |
+| 등록되지 않은 상품 코드 | 404 `PRODUCT_NOT_FOUND` |
+| 상품은 있는데 재고 행이 없음 | 데이터 손상이라 비즈니스 예외가 아닌 `IllegalStateException` → 500 (응답 형식은 공통 에러 응답 이슈에서) |
+| 같은 상품 코드 INSERT, 음수 수량 저장 | DB가 제약 위반으로 거절 |
+
+### 테스트 케이스
+| ID | 대상 규칙 | Given | When | Then | 종류 |
+|---|---|---|---|---|---|
+| TC-7-01 | R1 | `TS-BASIC-BLK-M`, 64자 코드 | `ProductCode` 생성 | 생성됨 | 단위 |
+| TC-7-02 | R1 | 빈 문자열, null, 65자, 소문자 포함, 공백 포함, `_` 포함 | `ProductCode` 생성 | `INVALID_PRODUCT_CODE` | 단위 |
+| TC-7-03 | R2 | 상품명 200자 | `Product.register` | 생성됨 | 단위 |
+| TC-7-04 | R2 | 상품명 null, 공백만, 201자 | `Product.register` | `INVALID_PRODUCT_NAME` | 단위 |
+| TC-7-05 | R3 | 0 | `Quantity` 생성 | 생성됨 | 단위 |
+| TC-7-06 | R3 | -1 | `Quantity` 생성 | `INVALID_QUANTITY` | 단위 |
+| TC-7-07 | R3 | 상품 id | `Inventory.create` | 수량 0 | 단위 |
+| TC-7-08 | R4 | `TS-BASIC-BLK-M` 상품 저장됨 | 같은 코드로 SQL INSERT | 유니크 제약 위반 | 통합 (PostgreSQL) |
+| TC-7-09 | R5 | 재고 행 수량 0 | SQL로 수량을 -1로 UPDATE, -1로 INSERT | 체크 제약 위반, 수량 0 유지 | 통합 (PostgreSQL) |
+| TC-7-10 | R6 | 상품 없음 | 없는 `product_id`로 재고 INSERT | 외래 키 제약 위반 | 통합 (PostgreSQL) |
+| TC-7-11 | R7 | 상품 `TS-BASIC-BLK-M`, 수량 5 | `GET /api/v1/inventory/TS-BASIC-BLK-M` | 200, 상품 코드, 상품명, 수량 5 | 통합 (HTTP) |
+| TC-7-12 | R8 | 상품 없음 | `GET /api/v1/inventory/NOT-EXIST` | 404, `code` = `"PRODUCT_NOT_FOUND"` | 통합 (HTTP) |
+| TC-7-13 | R1 | | `GET /api/v1/inventory/ts-basic` | 400, `code` = `"INVALID_PRODUCT_CODE"` | 통합 (HTTP) |
+
+- TC-7-08 ~ 10은 앱을 거치지 않고 SQL로 직접 넣어, 앱 검증이 없어도 DB가 막는지 확인한다. `flyway` 모듈 테스트에서 실제 마이그레이션을 적용한 PostgreSQL로 검증한다.
+- 엔티티와 스키마가 맞는지는 기존 기동 테스트(TC-1-01)가 `ddl-auto=validate`로 함께 확인한다.
+
+### PR 계획
+| PR | 브랜치 | 범위 | 포함 테스트 케이스 |
+|---|---|---|---|
+| 1 | `feat/7-inventory-schema` | 명세서, 스키마 마이그레이션, 도메인 모델(VO, 엔티티, 예외), 아키텍처 규칙의 SKU 표기를 productCode로 변경 (`Refs #7`) | TC-7-01 ~ TC-7-10 |
+| 2 | `feat/7-inventory-api` | Repository와 Adapter, 조회 서비스, 조회 API, 404/400 응답 (`Closes #7`) | TC-7-11 ~ TC-7-13 |
+
+PR 1만 머지돼도 노출되는 기능이 없어 단독으로 머지할 수 있다.
+
+### 결정 필요
+- 상품 코드 형식(R1): 영문 대문자, 숫자, 하이픈, 1~64자로 제안. 다른 기준이 있으면 알려 주세요.
+- API 경로: `GET /api/v1/inventory/{productCode}`로 제안. 입고, 출고도 `/api/v1/inventory/...` 아래에 둔다.
+
+### 변경 이력
