@@ -4,7 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
 import com.logistics.inventory.api.support.TestcontainersConfig;
+import java.sql.Connection;
+import java.sql.Statement;
 import java.util.stream.Stream;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -41,6 +44,9 @@ class ProductRenameApiTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private DataSource dataSource;
 
     private RestClient client;
 
@@ -96,6 +102,30 @@ class ProductRenameApiTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(JsonPath.<String>read(response.getBody(), "$.code")).isEqualTo("INVALID_PRODUCT_CODE");
+    }
+
+    @Test
+    @DisplayName("TC-14-08 다른 트랜잭션이 재고 행을 잠그고 원장을 쓰는 중에도 상품명 수정은 기다리지 않고 성공한다")
+    void 재고_잠금_중_이름_수정() throws Exception {
+        try (Connection stockTx = dataSource.getConnection()) {
+            // 입고, 출고 트랜잭션이 커밋 전에 잡고 있는 잠금: 재고 행 FOR UPDATE, 원장 FK가 거는 상품 행 FOR KEY SHARE
+            stockTx.setAutoCommit(false);
+            try (Statement statement = stockTx.createStatement()) {
+                statement.execute("SELECT quantity FROM inventory WHERE product_id = 1 FOR UPDATE");
+                statement.execute("""
+                        INSERT INTO stock_transaction (product_id, type, quantity, before_quantity, after_quantity, requester_id)
+                        VALUES (1, 'INBOUND', 1, 5, 6, 'worker-01')
+                        """);
+            }
+
+            // 기다렸다면 lock_timeout(3초)에 걸려 503이 된다
+            final ResponseEntity<String> response = rename(PRODUCT_CODE, "{\"name\": \"베이직 반팔 티셔츠 검정 M\"}");
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            stockTx.rollback();
+        }
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT name FROM product WHERE product_code = ?", String.class, PRODUCT_CODE)).isEqualTo("베이직 반팔 티셔츠 검정 M");
     }
 
     private static Stream<String> invalidNameBodies() {
