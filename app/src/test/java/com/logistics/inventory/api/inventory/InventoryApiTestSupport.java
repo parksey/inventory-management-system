@@ -14,7 +14,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.web.client.RestClient;
 
-// 입고 API 테스트의 공통 준비: 실제 HTTP 요청과, 재고와 원장을 SQL로 직접 읽는 헬퍼
+// 입고, 출고 API 테스트의 공통 준비: 실제 HTTP 요청과, 재고와 원장을 SQL로 직접 읽는 헬퍼
 // 테스트마다 TS-BASIC-BLK-M 상품과 재고 5로 시작한다
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -50,8 +50,16 @@ abstract class InventoryApiTestSupport {
     }
 
     protected ResponseEntity<String> inbound(final String productCode, final String requesterId, final String body) {
+        return post("inbound", productCode, requesterId, body);
+    }
+
+    protected ResponseEntity<String> outbound(final String productCode, final String requesterId, final String body) {
+        return post("outbound", productCode, requesterId, body);
+    }
+
+    private ResponseEntity<String> post(final String action, final String productCode, final String requesterId, final String body) {
         return client.post()
-                .uri("/api/v1/inventory/{code}/inbound", productCode)
+                .uri("/api/v1/inventory/{code}/{action}", productCode, action)
                 .header("X-User-Id", requesterId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)

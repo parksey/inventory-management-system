@@ -236,7 +236,7 @@ private Product register(final ProductCode productCode) {
 
 - TC-12-01, 02는 `inventory/schema` 테스트에서 앱 없이 SQL로 검증한다 (#7의 제약 테스트와 같은 방식).
 - TC-12-07 ~ 17은 `app`에서 Testcontainers PostgreSQL과 실제 HTTP로 검증한다. 원장과 재고는 `JdbcTemplate`으로 직접 읽어 확인한다.
-  - 요청 하나의 결과(TC-12-07 ~ 12, 16)는 `InventoryInboundApiTest`, 여러 요청이나 다른 트랜잭션과 겹치는 경우(TC-12-13 ~ 15, 17)는 `InventoryInboundConcurrencyTest`에 둔다. 동시성 테스트는 스레드와 커넥션을 직접 다루고 느려서(잠금 대기 초과 3초) 따로 모으고, 출고와 입출고 혼합 동시성 테스트도 같은 곳에 붙인다. 공통 준비(HTTP 요청, 재고와 원장 조회)는 `InventoryApiTestSupport`에 둔다.
+  - 요청 하나의 결과(TC-12-07 ~ 12, 16)는 `InventoryInboundApiTest`, 여러 요청이나 다른 트랜잭션과 겹치는 경우(TC-12-13 ~ 15, 17)는 `InventoryConcurrencyTest`에 둔다. 동시성 테스트는 스레드와 커넥션을 직접 다루고 느려서(잠금 대기 초과 3초) 따로 모으고, 출고와 입출고 혼합 동시성 테스트도 같은 곳에 붙인다. 공통 준비(HTTP 요청, 재고와 원장 조회)는 `InventoryApiTestSupport`에 둔다.
 - TC-12-10의 `1.5`: Jackson은 기본으로 소수를 정수 필드에 넣을 때 소수점을 버린다(`1.5` → `1`). 입고 수량이 조용히 바뀌지 않도록 이 경우를 400으로 막는다.
 - TC-12-17은 TC-12-14가 결과만 보는 것을 보완한다. 동시에 보내는 테스트는 요청이 우연히 어긋나면 `ON CONFLICT`에서 기다리는 경로를 타지 않고도 통과하므로, 다른 트랜잭션이 등록 중인 상태를 직접 만들어 "기다렸다가 넣지 않고(`created = false`) 그 상품과 재고를 쓴다"를 확인한다.
 - 동시성 테스트(TC-12-13, 14)는 한 앱 인스턴스에 요청을 동시에 보낸다. 앱 메모리에 잠금이나 상태가 없고 정합성을 DB만으로 지키므로, 같은 DB를 쓰는 Pod 여러 대와 같은 조건이다. 여러 앱 인스턴스를 띄운 검증은 #16에서 한다.
@@ -266,3 +266,4 @@ private Product register(final ProductCode productCode) {
 - 새 상품 등록 경합을 순서대로 재현하는 TC-12-17 추가, TC-12-07에 상품명을 덮어쓰지 않는지 확인 추가 (구현 중)
 - 입고 API를 `InboundController`로 분리. 유스케이스 인터페이스는 구현이 하나뿐이라 두지 않음 (구현 중)
 - 동시성 테스트를 `InventoryInboundConcurrencyTest`로 분리하고 공통 준비를 `InventoryApiTestSupport`로 뺌 (구현 중)
+- 동시성 테스트 클래스 이름을 `InventoryInboundConcurrencyTest`에서 `InventoryConcurrencyTest`로 변경. 출고(#13)의 동시성 테스트도 함께 두기 때문 (#13)

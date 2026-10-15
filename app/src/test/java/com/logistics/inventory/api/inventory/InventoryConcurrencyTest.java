@@ -22,8 +22,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
-// 여러 요청이나 다른 트랜잭션과 겹칠 때의 입고: 동시 입고, 등록 경합, 잠금 대기 초과
-class InventoryInboundConcurrencyTest extends InventoryApiTestSupport {
+// 여러 요청이나 다른 트랜잭션과 겹칠 때의 입고, 출고: 동시 요청, 등록 경합, 잠금 대기 초과
+class InventoryConcurrencyTest extends InventoryApiTestSupport {
 
     @Autowired
     private DataSource dataSource;
@@ -98,6 +98,22 @@ class InventoryInboundConcurrencyTest extends InventoryApiTestSupport {
                 Long.class, NEW_PRODUCT_CODE)).isEqualTo(1);
         assertThat(quantityOf(NEW_PRODUCT_CODE)).isEqualTo(3);
         assertThat(countTransactions()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("TC-13-12 같은 상품에 동시에 출고해도 재고는 음수가 되지 않고 성공한 출고만큼만 줄어든다")
+    void 같은_상품_동시_출고() throws Exception {
+        jdbcTemplate.update("UPDATE inventory SET quantity = 10");
+
+        final List<ResponseEntity<String>> responses = concurrently(20, i -> outbound(PRODUCT_CODE, "worker-" + i, "{\"quantity\": 1}"));
+
+        assertThat(responses).filteredOn(response -> response.getStatusCode() == HttpStatus.OK).hasSize(10);
+        assertThat(responses).filteredOn(response -> response.getStatusCode() == HttpStatus.CONFLICT)
+                .hasSize(10)
+                .allSatisfy(response -> assertThat(JsonPath.<String>read(response.getBody(), "$.code")).isEqualTo("INSUFFICIENT_STOCK"));
+        assertThat(quantityOf(PRODUCT_CODE)).isZero();
+        assertThat(countTransactions()).isEqualTo(10);
+        assertThat(jdbcTemplate.queryForObject("SELECT sum(quantity) FROM stock_transaction WHERE type = 'OUTBOUND'", Long.class)).isEqualTo(10);
     }
 
     // 스레드를 모두 준비시킨 뒤 한 번에 출발시켜 요청이 실제로 겹치게 한다. i는 1부터
