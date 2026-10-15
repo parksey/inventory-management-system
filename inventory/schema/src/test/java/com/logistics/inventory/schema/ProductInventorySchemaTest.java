@@ -1,4 +1,4 @@
-package com.logistics.inventory.flyway;
+package com.logistics.inventory.schema;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

@@ -8,4 +8,5 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
 
     testRuntimeOnly(project(":support:flyway"))
+    testRuntimeOnly(project(":inventory:schema"))
 }

@@ -6,6 +6,7 @@ dependencies {
     // inventory
     implementation(project(":inventory:core"))
     runtimeOnly(project(":inventory:db"))
+    runtimeOnly(project(":inventory:schema"))
 
     // support
     runtimeOnly(project(":support:flyway"))
