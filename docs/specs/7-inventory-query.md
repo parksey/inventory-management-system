@@ -66,16 +66,18 @@ CREATE TABLE inventory (
 | 패키지 | 클래스 | 역할 |
 |---|---|---|
 | `product` | `ProductCode` (VO, record) | 형식 검증 (R1) |
-| `product` | `Product` (엔티티) | `Product.register(productCode, name)`, 상품명 검증 (R2) |
+| `product` | `Product` (엔티티) | `id`, `productCode`, `name`. 조회에 필요한 필드만 매핑 |
 | `product` | `ProductRepository` | `findByProductCode(ProductCode)` |
-| `inventory` | `Quantity` (VO, record) | 0 이상 검증 (R3) |
-| `inventory` | `Inventory` (엔티티) | `Inventory.create(productId)`. `Product`는 객체가 아니라 `productId`로 참조 |
+| `inventory` | `Quantity` (VO, record) | 0 이상 검증 (R2) |
+| `inventory` | `Inventory` (엔티티) | `productId`, `quantity`. `Product`는 객체가 아니라 `productId`로 참조 |
 | `inventory` | `InventoryRepository` | `findByProductId(Long)` |
 | `inventory` | `InventoryService` | `getStock(ProductCode)` → `StockResult(productCode, name, quantity)` |
 | `common` | `BaseTimeEntity` | `@MappedSuperclass`. `@PrePersist`에서 `createdAt`만, `@PreUpdate`에서 `updatedAt`만 채운다. `Product`, `Inventory`가 상속 |
 | `common` | `BusinessException`, `ErrorCode`, `ErrorKind` | 비즈니스 예외 |
 
-`ErrorCode`: `INVALID_PRODUCT_CODE`(INVALID), `INVALID_PRODUCT_NAME`(INVALID), `INVALID_QUANTITY`(INVALID), `PRODUCT_NOT_FOUND`(NOT_FOUND). 입고, 출고에 필요한 값은 그 이슈에서 추가한다.
+`ErrorCode`: `INVALID_PRODUCT_CODE`(INVALID), `INVALID_QUANTITY`(INVALID), `PRODUCT_NOT_FOUND`(NOT_FOUND).
+
+상품과 재고를 새로 만드는 메서드(`Product.register`, `Inventory.create`)와 상품명 검증은 이 이슈에 넣지 않는다. #7은 조회만 하고 테스트 데이터는 SQL로 넣어서 부르는 곳이 없다. 처음 쓰는 입고 이슈에서 함께 추가한다. 입고, 출고에 필요한 에러 코드도 그 이슈에서 추가한다.
 
 **db** (`inventory-db`): `ProductJpaRepository`, `ProductRepositoryAdapter`, `InventoryJpaRepository`, `InventoryRepositoryAdapter` (package-private)
 
@@ -98,13 +100,12 @@ CREATE TABLE inventory (
 ### 비즈니스 규칙
 - R1. 상품 코드는 영문 대문자, 숫자, 하이픈으로 된 1~64자다. 소문자를 대문자로 바꿔 주지 않고 거절한다.
   - 이유: UNIQUE 제약은 글자가 정확히 같을 때만 막는다. 형식이 자유로우면 `ts-basic`, `TS-BASIC`, `TS-BASIC `처럼 사람 눈에는 같은 코드가 서로 다른 상품으로 저장된다. 입력에서 한 가지 형태만 받아 중복을 막는다. 자동 변환하지 않는 이유는 클라이언트가 보낸 코드와 저장된 코드가 달라지면 연동하는 쪽에서 찾지 못하기 때문이다. 64자는 실제 코드가 들어가기에 넉넉한 상한이다.
-- R2. 상품명은 비어 있지 않은 200자 이하다.
-- R3. 재고 수량은 0 이상이다.
-- R4. 같은 상품 코드의 상품은 DB에 하나만 저장된다.
-- R5. 재고 수량이 음수인 행은 DB에 저장되지 않는다.
-- R6. 재고 행은 존재하는 상품에만 생긴다.
-- R7. 등록된 상품 코드로 조회하면 상품 코드, 상품명, 현재 수량을 돌려준다.
-- R8. 등록되지 않은 상품 코드로 조회하면 404 `PRODUCT_NOT_FOUND`를 돌려준다.
+- R2. 재고 수량은 0 이상이다.
+- R3. 같은 상품 코드의 상품은 DB에 하나만 저장된다.
+- R4. 재고 수량이 음수인 행은 DB에 저장되지 않는다.
+- R5. 재고 행은 존재하는 상품에만 생긴다.
+- R6. 등록된 상품 코드로 조회하면 상품 코드, 상품명, 현재 수량을 돌려준다.
+- R7. 등록되지 않은 상품 코드로 조회하면 404 `PRODUCT_NOT_FOUND`를 돌려준다.
 
 ### 예외 케이스
 | 상황 | 결과 |
@@ -119,35 +120,32 @@ CREATE TABLE inventory (
 |---|---|---|---|---|---|
 | TC-7-01 | R1 | `TS-BASIC-BLK-M`, 64자 코드 | `ProductCode` 생성 | 생성됨 | 단위 |
 | TC-7-02 | R1 | 빈 문자열, null, 65자, 소문자 포함, 공백 포함, `_` 포함 | `ProductCode` 생성 | `INVALID_PRODUCT_CODE` | 단위 |
-| TC-7-03 | R2 | 상품명 200자 | `Product.register` | 생성됨 | 단위 |
-| TC-7-04 | R2 | 상품명 null, 공백만, 201자 | `Product.register` | `INVALID_PRODUCT_NAME` | 단위 |
-| TC-7-05 | R3 | 0 | `Quantity` 생성 | 생성됨 | 단위 |
-| TC-7-06 | R3 | -1 | `Quantity` 생성 | `INVALID_QUANTITY` | 단위 |
-| TC-7-07 | R3 | 상품 id | `Inventory.create` | 수량 0 | 단위 |
-| TC-7-08 | R4 | `TS-BASIC-BLK-M` 상품 저장됨 | 같은 코드로 SQL INSERT | 유니크 제약 위반 | 통합 (PostgreSQL) |
-| TC-7-09 | R5 | 재고 행 수량 0 | SQL로 수량을 -1로 UPDATE, -1로 INSERT | 체크 제약 위반, 수량 0 유지 | 통합 (PostgreSQL) |
-| TC-7-10 | R6 | 상품 없음 | 없는 `product_id`로 재고 INSERT | 외래 키 제약 위반 | 통합 (PostgreSQL) |
-| TC-7-11 | R7 | 상품 `TS-BASIC-BLK-M`, 수량 5 | `GET /api/v1/inventory/TS-BASIC-BLK-M` | 200, 상품 코드, 상품명, 수량 5 | 통합 (HTTP) |
-| TC-7-12 | R8 | 상품 없음 | `GET /api/v1/inventory/NOT-EXIST` | 404, `code` = `"PRODUCT_NOT_FOUND"` | 통합 (HTTP) |
-| TC-7-13 | R1 | | `GET /api/v1/inventory/ts-basic` | 400, `code` = `"INVALID_PRODUCT_CODE"` | 통합 (HTTP) |
+| TC-7-03 | R2 | 0 | `Quantity` 생성 | 생성됨 | 단위 |
+| TC-7-04 | R2 | -1 | `Quantity` 생성 | `INVALID_QUANTITY` | 단위 |
+| TC-7-05 | R3 | `TS-BASIC-BLK-M` 상품 저장됨 | 같은 코드로 SQL INSERT | 유니크 제약 위반 | 통합 (PostgreSQL) |
+| TC-7-06 | R4 | 재고 행 수량 0 | SQL로 수량을 -1로 UPDATE, -1로 INSERT | 체크 제약 위반, 수량 0 유지 | 통합 (PostgreSQL) |
+| TC-7-07 | R5 | 상품 없음 | 없는 `product_id`로 재고 INSERT | 외래 키 제약 위반 | 통합 (PostgreSQL) |
+| TC-7-08 | R6 | 상품 `TS-BASIC-BLK-M`, 수량 5 | `GET /api/v1/inventory/TS-BASIC-BLK-M` | 200, 상품 코드, 상품명, 수량 5 | 통합 (HTTP) |
+| TC-7-09 | R7 | 상품 없음 | `GET /api/v1/inventory/NOT-EXIST` | 404, `code` = `"PRODUCT_NOT_FOUND"` | 통합 (HTTP) |
+| TC-7-10 | R1 | | `GET /api/v1/inventory/ts-basic` | 400, `code` = `"INVALID_PRODUCT_CODE"` | 통합 (HTTP) |
 
-- TC-7-08 ~ 10은 앱을 거치지 않고 SQL로 직접 넣어, 앱 검증이 없어도 DB가 막는지 확인한다. `flyway` 모듈 테스트에서 실제 마이그레이션을 적용한 PostgreSQL로 검증한다.
+- TC-7-05 ~ 07은 앱을 거치지 않고 SQL로 직접 넣어, 앱 검증이 없어도 DB가 막는지 확인한다. `flyway` 모듈 테스트에서 실제 마이그레이션을 적용한 PostgreSQL로 검증한다.
 - 엔티티와 스키마가 맞는지는 기존 기동 테스트(TC-1-01)가 `ddl-auto=validate`로 함께 확인한다.
 
 ### PR 계획
 | PR | 브랜치 | 범위 | 포함 테스트 케이스 |
 |---|---|---|---|
-| 1 | `feat/7-inventory-schema` | 명세서, 스키마 마이그레이션(`V7_1`), DB 제약 테스트 (`Refs #7`) | TC-7-08 ~ TC-7-10 |
-| 2 | `feat/7-inventory-query` | 도메인 모델(VO, 엔티티, `BaseTimeEntity`, 예외), Repository와 Adapter, 조회 서비스, 조회 API, 404/400 응답, 아키텍처 규칙의 SKU 표기를 productCode로 변경 (`Closes #7`) | TC-7-01 ~ TC-7-07, TC-7-11 ~ TC-7-13 |
+| 1 | `feat/7-inventory-schema` | 명세서, 스키마 마이그레이션(`V7_1`), DB 제약 테스트 (`Refs #7`) | TC-7-05 ~ TC-7-07 |
+| 2 | `feat/7-inventory-query` | 도메인 모델(VO, 엔티티, `BaseTimeEntity`, 예외), Repository와 Adapter, 조회 서비스, 조회 API, 404/400 응답, 아키텍처 규칙의 SKU 표기를 productCode로 변경 (`Closes #7`) | TC-7-01 ~ TC-7-04, TC-7-08 ~ TC-7-10 |
 
 - 나누는 이유: 스키마는 앱 코드 없이 SQL만으로 완결되고, DB 제약을 SQL로 직접 검증할 수 있다. PR 1만 머지돼도 노출되는 기능이 없어 단독으로 머지할 수 있다. 리뷰도 "테이블과 제약이 맞나"와 "도메인 규칙과 API 계약이 맞나"를 따로 본다.
 
 ### 결정 필요
-- 상품 코드 형식(R1): 영문 대문자, 숫자, 하이픈, 1~64자로 제안. 다른 기준이 있으면 알려 주세요.
-- API 경로: `GET /api/v1/inventory/{productCode}`로 제안. 입고, 출고도 `/api/v1/inventory/...` 아래에 둔다.
+- 없음 (상품 코드 형식은 R1, API 경로는 `GET /api/v1/inventory/{productCode}`로 확정)
 
 ### 변경 이력
 - 설계 결정마다 이유와 비교한 대안을 추가 (승인 전 보완)
 - 두 테이블로 나누는 이유를 장점(간섭 없음, 확장 범위)과 비용으로 다시 정리 (승인 전 보완)
 - 상품 코드는 전체 고유로 두고 테넌트별 고유는 범위 밖으로 명시, SKU 용어 설명 제거 (승인 전 보완)
 - PR을 스키마와 기능(도메인 + API)으로 다시 나누고, `updated_at`은 수정 때만 채우도록 변경 (승인 전 보완)
+- 생성 메서드와 상품명 검증을 입고 이슈로 미루고 규칙, TC 번호를 다시 매김. 결정 필요 항목 확정 (승인 전 보완)
