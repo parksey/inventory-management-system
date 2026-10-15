@@ -35,7 +35,7 @@ gh issue view {N}
 - 이슈의 요구사항 · 완료 조건 · Open Questions를 확인한다. 상위 요구사항 이슈가 있으면 함께 읽는다.
 - 선행 이슈가 끝나지 않았으면 시작하지 않고 알린다.
 - Open Questions가 남아 있으면 명세서를 쓰기 전에 먼저 묻는다.
-- 비공개 상세 자료(`.pm-plans/`)가 있으면 참고만 하고, 공개 산출물(이슈 · PR · 코드 · docs)에 링크하지 않는다.
+- 비공개 상세 자료(`.pm-plans/`)가 있으면 참고만 하고, 공개 산출물(이슈 · PR · 커밋 · 코드 · docs)에 링크하지 않는다. 경로뿐 아니라 아직 GitHub에 없는 이슈 번호와 로드맵 시점도 쓰지 않는다 (`gh issue list`로 있는 이슈인지 확인).
 
 ## 2단계. 기능 명세서 → 승인
 
@@ -49,7 +49,7 @@ gh issue view {N}
 git fetch origin
 git switch -c {type}/{N}-{영문-설명} origin/main          # PR 계획 1번의 브랜치 (3-1과 같은 규칙)
 git add docs/specs/{N}-{영문-설명}.md
-git commit -m "docs({scope}): 기능 명세 작성 (#{N})"
+git commit -m "docs({scope}): 기능 명세 작성"
 git push -u origin HEAD
 gh issue comment {N} --body-file "$(git rev-parse --git-dir)/spec-request-{N}.md"
 ```
@@ -80,7 +80,7 @@ main으로 전환하지 않고 `origin/main`에서 바로 분기한다 (worktree
   @DisplayName("TC-7-01 재고보다 많이 출고하면 INSUFFICIENT_STOCK 예외가 발생하고 재고는 그대로다")
   void 재고_초과_출고() { ... }
   ```
-- 커밋: `{type}({scope}): {한국어 제목} (#{N})`. 커밋마다 빌드가 통과해야 한다.
+- 커밋: `{type}({scope}): {한국어 제목}` (이슈 번호를 붙이지 않는다). 커밋마다 빌드가 통과해야 한다.
 - 범위 밖 작업이나 버그를 발견하면 지금 하지 말고 적어둔다 (4단계에서 이슈로 제안). TODO 주석을 남기지 않는다.
 - 명세서와 다르게 가야 하면 멈추고 알린다. 승인되면 이 PR에서 명세서 파일을 고치고("변경 이력"에 사유), PR의 "명세와 달라진 점"에도 쓴다.
 
@@ -100,12 +100,15 @@ $S {N}                                                     # 마지막 PR만: �
 ### 3-4. PR 작성 — 어떻게 개발했는지
 ```bash
 git push -u origin HEAD
-gh pr create --title "{type}({scope}): {제목} (#{N})" --body-file "$(git rev-parse --git-dir)/pr-{N}.md" \
+gh pr create --title "{type}({scope}): {제목}" --body-file "$(git rev-parse --git-dir)/pr-{N}.md" \
   --label "$(gh issue view {N} --json labels --jq '[.labels[].name] | join(",")')" --assignee @me
 ```
 `.github/pull_request_template.md`의 모든 섹션을 채운다. 특히:
 - 중간 PR은 `Refs #{N}`, 마지막 PR은 `Closes #{N}`
-- "구현 내용"은 명세서를 반복하지 않고 **실제로 어떻게 개발했는지**를 쓴다. 명세서와 다르게 한 부분은 "명세와 달라진 점"에
+- "구현 내용"은 커밋별이 아니라 **한 일 단위 항목**으로 쓴다 (예: "p6spy 모듈화 및 프로파일 분리", "p6spy 로그 읽기 쉽게 formatting"). 명세서를 반복하지 않는다. 명세서와 다르게 한 부분은 "명세와 달라진 점"에
+- **한 일만 적는다.** 실제로 비교하지 않은 대안을 "설계 결정"에 넣지 않는다. 해당 없는 섹션은 "없음"
+- PR 본문 초안은 올리기 전에 개발자에게 보여주고 확인받는다
+- PR을 연 뒤 수정은 새 커밋으로 올린다. 기존 커밋을 고쳐 force-push하지 않는다 (예외: 3-6의 main rebase)
 - **테스트 케이스 표는 필수** — 이 PR이 다룬 TC 전부
 
 ### 3-5. 셀프 리뷰 → 머지 대기
