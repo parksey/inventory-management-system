@@ -1,6 +1,6 @@
 ---
 name: inventory-architecture
-description: 재고 관리 시스템 프로젝트의 아키텍처·도메인 설계 규칙 (실용주의 헥사고날 + api/domain/db/flyway 멀티모듈 + DDD/객체지향 + scale-out 동시성). 이 프로젝트에서 Java 코드를 작성·수정·리뷰할 때는 반드시 먼저 읽을 것 — 새 API·엔티티·VO·Repository·서비스 추가, 패키지/모듈 배치 결정, build.gradle 의존성 변경, 예외 처리, 트랜잭션·락 처리, 리팩터링 등 "코드가 어느 모듈에 어떤 모양으로 들어가야 하는지"가 걸린 모든 작업에 해당한다. 사용자가 규칙을 명시적으로 언급하지 않아도 적용한다.
+description: 재고 관리 시스템 프로젝트의 아키텍처·도메인 설계 규칙 (실용주의 헥사고날 + api/domain/db/flyway/p6spy 멀티모듈 + DDD/객체지향 + scale-out 동시성). 이 프로젝트에서 Java 코드를 작성·수정·리뷰할 때는 반드시 먼저 읽을 것 — 새 API·엔티티·VO·Repository·서비스 추가, 패키지/모듈 배치 결정, build.gradle 의존성 변경, 예외 처리, 트랜잭션·락 처리, 리팩터링 등 "코드가 어느 모듈에 어떤 모양으로 들어가야 하는지"가 걸린 모든 작업에 해당한다. 사용자가 규칙을 명시적으로 언급하지 않아도 적용한다.
 ---
 
 # 재고 관리 시스템 아키텍처 규칙
@@ -21,22 +21,33 @@ description: 재고 관리 시스템 프로젝트의 아키텍처·도메인 설
 
 ## 1. 모듈 구조와 의존 방향
 
-모듈은 모두 루트 바로 아래 디렉토리다: `api`, `inventory-domain`(이하 `domain`), `inventory-db`(이하 `db`), `flyway`.
+실행 모듈은 `app/`, 실행 보조 모듈은 `support/` 아래에 두고, 도메인 모듈은 `{도메인}-domain`과 `{도메인}-db` 쌍으로 루트에 둔다.
+
+| 디렉토리 | Gradle 경로 | 이하 부르는 이름 |
+|---|---|---|
+| `app/api` | `:app:api` | `api` |
+| `inventory-domain` | `:inventory-domain` | `domain` |
+| `inventory-db` | `:inventory-db` | `db` |
+| `support/flyway` | `:support:flyway` | `flyway` |
+| `support/p6spy` | `:support:p6spy` | `p6spy` |
+
+`app`, `support`는 코드 없는 컨테이너 프로젝트다. 확장할 때는 `app/{실행형태}`(예: `app/batch`), `{도메인}-domain`과 `{도메인}-db`(예: `order-domain`), `support/{기능}`(예: `support/logging`)으로 붙인다.
 
 ```
- api (bootJar) ──compile──► domain ◄──compile── db
-   │                                            │
-   ├─ runtimeOnly ──► db                        └─ testRuntimeOnly ──► flyway
+ api (bootJar) ──implementation──► domain ◄──compileOnly── db
+   │                                                       │
+   ├─ runtimeOnly ──► db                                   └─ testRuntimeOnly ──► flyway
    ├─ runtimeOnly ──► flyway
-   └─ runtimeOnly ──► p6spy-spring-boot-starter (라이브러리)
+   └─ runtimeOnly ──► p6spy
 ```
 
 | 모듈 | 담는 것 | 허용 의존성 |
 |---|---|---|
-| `api` | **유일한 실행 모듈(bootJar)**. `@SpringBootApplication`, Controller, 요청/응답 DTO, `GlobalExceptionHandler`, 웹 설정, `application.yml` | `implementation(project(":inventory-domain"))`, `runtimeOnly(project(":inventory-db"))`, `runtimeOnly(project(":flyway"))`, `runtimeOnly` p6spy-spring-boot-starter, spring-web, validation, actuator, spring-tx(`org.springframework.dao` 예외 매핑용) |
+| `api` | **유일한 실행 모듈(bootJar)**. `@SpringBootApplication`, Controller, 요청/응답 DTO, `GlobalExceptionHandler`, 웹 설정, `application.yml` | `implementation(project(":inventory-domain"))`, `runtimeOnly(project(":inventory-db"))`, `runtimeOnly(project(":support:flyway"))`, `runtimeOnly(project(":support:p6spy"))`, spring-boot-starter-webmvc, validation, actuator, spring-tx(`org.springframework.dao` 예외 매핑용) |
 | `domain` | 엔티티(JPA 어노테이션 포함), VO, Repository **인터페이스**, 도메인/애플리케이션 서비스, Command·Result, 도메인 예외·ErrorCode | `compileOnly` jakarta.persistence-api, spring-context, spring-tx (Hibernate 어노테이션이 필요하면 `compileOnly` hibernate-core) |
-| `db` | Spring Data JPA Repository, domain Repository 인터페이스의 구현체(Adapter), native query, JPA·DataSource 설정 | `implementation(project(":inventory-domain"))`, spring-boot-starter-data-jpa, postgresql, `testRuntimeOnly(project(":flyway"))` |
-| `flyway` | **스키마의 단일 원천**. `db/migration/V*__*.sql`과 Flyway 의존성만. Java 코드 없음 | flyway-core, flyway-database-postgresql |
+| `db` | Spring Data JPA Repository, domain Repository 인터페이스의 구현체(Adapter), native query, JPA·DataSource 설정, `inventory-db.yml`(DataSource와 JPA 설정, 실행 단위별 값은 환경변수로) | `compileOnly(project(":inventory-domain"))`(실행 시점 domain은 api가 넣는다), spring-boot-starter-data-jpa, postgresql, `testRuntimeOnly(project(":support:flyway"))` |
+| `flyway` | **스키마의 단일 원천**. `db/migration/V*__*.sql`과 Flyway 의존성만. main에 Java 코드 없음 (테스트는 Testcontainers PostgreSQL로 마이그레이션 적용을 검증) | spring-boot-starter-flyway(Boot 4부터 Flyway 자동 설정이 별도 모듈), flyway-database-postgresql |
+| `p6spy` | SQL 로깅. p6spy 스타터, SQL 포매터(`PrettySqlFormatter`), 포매터를 등록하는 AutoConfiguration(`META-INF/spring/...AutoConfiguration.imports`) | p6spy-spring-boot-starter, `compileOnly` spring-boot-autoconfigure, hibernate-core(포매터용) |
 
 **금지**
 - `api`가 `db`·`flyway`·p6spy의 클래스를 import (그래서 `runtimeOnly`다 — 컴파일 에러로 막힌다)
@@ -44,12 +55,13 @@ description: 재고 관리 시스템 프로젝트의 아키텍처·도메인 설
 - `domain`이 다른 어떤 프로젝트 모듈도 참조
 - `flyway` 외의 모듈에 마이그레이션 SQL을 두거나, `ddl-auto`를 `validate` 외 값(create, update)으로 설정
 - p6spy를 운영 프로파일에서 활성화 (`decorator.datasource.enabled=true`)
+- 운영 설정을 프로파일 없는 기본 동작에 기대기 — 프로파일 미지정은 local이고, 운영은 `prod`를 명시해야만 운영 설정이 된다
 
 **이유**
 - 도메인이 저장소 인터페이스를 소유하고 db가 구현하는 의존성 역전(DIP)이 이 구조의 핵심이다. 엔티티에 JPA 어노테이션을 두는 것은 매핑 메타데이터만 허용한 의도적 타협이고, 도메인이 Spring Data나 DB 구현을 아는 순간 타협이 아니라 붕괴가 된다.
 - 규칙을 문서가 아니라 **빌드가 강제**하게 만든 것이므로, 컴파일이 안 된다고 의존성을 추가해 우회하지 않는다.
-- `flyway` 분리: scale-out 환경에서 Pod 여러 개가 동시에 기동하며 마이그레이션을 돌리면 경합한다. 운영에서는 Helm `pre-install/pre-upgrade` hook Job이 이 모듈의 SQL로 **한 번만** 마이그레이션하고, 앱은 `spring.flyway.enabled=false` + `ddl-auto=validate`로 스키마와 엔티티 불일치만 검증한다. 로컬에서는 `local` 프로파일에서 `spring.flyway.enabled=true`로 앱 기동 시 적용한다. db 테스트도 같은 SQL을 써서 운영 스키마와 테스트 스키마가 갈라지지 않는다.
-- p6spy: 별도 모듈 없이 api에 `runtimeOnly`로만 넣어 api 코드가 의존하지 못하게 한다. jar는 운영 이미지에도 포함되므로, 운영 프로파일에서는 `decorator.datasource.enabled=false`로 DataSource 래핑 자체를 끄고 로컬·테스트에서만 켠다 (`enable-logging=false`는 로깅만 끄고 프록시 오버헤드는 남는다).
+- `flyway` 분리: 스키마 SQL을 한 모듈에 모아 앱, 테스트, (나중의) 마이그레이션 Job이 같은 SQL을 쓰게 한다. **현재는 모든 프로파일에서 앱 기동 시 마이그레이션**한다(Boot 기본값, 여러 Pod가 동시에 떠도 Flyway 락으로 하나만 실행). **Helm 차트를 도입할 때** 운영만 `spring.flyway.enabled=false`로 끄고 `pre-install/pre-upgrade` hook Job으로 옮긴다 — 그때 얻는 것: Pod 기동 지연 제거, 마이그레이션 실패 시 배포 중단(롤링 중 재시작 루프 방지), 앱 계정에서 DDL 권한 제거. 앱은 어느 경우든 `ddl-auto=validate`로 스키마와 엔티티 불일치를 검증한다.
+- p6spy: 별도 모듈로 두고 api에는 `runtimeOnly`로만 넣어 api 코드가 의존하지 못하게 한다. 포매터 같은 로깅 코드가 api에 섞이지 않고, p6spy를 다른 방식으로 바꿔도 이 모듈 안에서 끝난다. jar는 운영 이미지에도 포함되므로, 운영 프로파일에서는 `decorator.datasource.enabled=false`로 DataSource 래핑 자체를 끄고 로컬·테스트에서만 켠다 (`enable-logging=false`는 로깅만 끄고 프록시 오버헤드는 남는다).
 - 마이그레이션은 **하위 호환**으로 작성한다: pre-upgrade Job이 끝난 뒤에도 롤링 업데이트 동안 구버전 Pod가 새 스키마에서 돈다. 컬럼 삭제·이름 변경은 추가 → 코드 전환 → 삭제로 배포를 나눈다.
 
 ### 패키지 배치
@@ -63,8 +75,9 @@ inventory-db/      com.logistics.inventory.db
   ├─ product/        ProductJpaRepository, ProductRepositoryAdapter
   ├─ inventory/      ...
   └─ config/         JpaConfig (@EntityScan("...domain"), @EnableJpaRepositories("...db"))
-flyway/            src/main/resources/db/migration/   V{이슈번호}_{순번}__{설명}.sql — 예: V3_1__create_inventory_schema.sql (Java 코드 없음)
-api/               com.logistics.inventory.api
+support/flyway/    src/main/resources/db/migration/   V{이슈번호}_{순번}__{설명}.sql — 예: V3_1__create_inventory_schema.sql (Java 코드 없음)
+support/p6spy/     com.logistics.inventory.p6spy   PrettySqlFormatter, autoconfigure/P6SpyFormatterAutoConfiguration
+app/api/           com.logistics.inventory.api
   ├─ inventory/      InventoryController, *Request, *Response
   ├─ common/         GlobalExceptionHandler, ErrorStatusMapper(ErrorKind → HttpStatus), ApiErrorCode
   ├─ InventoryApplication (scanBasePackages = "com.logistics.inventory")
@@ -115,6 +128,7 @@ Response DTO ◄──from(result)── Result ◄─────┘
 | 엔티티의 `@Builder`, `@AllArgsConstructor` | 사용하지 않는다 — 정적 팩토리를 우회해 불변식 검증 없이 객체가 생긴다 |
 | `@Getter`, `@RequiredArgsConstructor`, `@NoArgsConstructor(access = PROTECTED)` | 허용 |
 | `final` | 적극 사용: 주입받는 의존성(`private final`), 메서드 파라미터, 재할당하지 않는 지역 변수, 엔티티가 아닌 클래스의 필드. 단 **엔티티의 영속 필드는 final로 두지 않는다**(JPA 스펙상 프록시·리플렉션 주입 대상) |
+| 긴 파라미터 목록 | 한 줄에 다 들어가지 않으면 파라미터를 한 줄에 하나씩 두고, 닫는 괄호 `) {`는 따로 한 줄에 둔다 |
 | `record` | VO, Command, Result, Request/Response DTO, 이벤트. **엔티티는 record로 만들지 않는다**(JPA는 가변 객체·프록시가 필요) |
 
 ### 3.4 테이블의 일부 컬럼만 매핑하는 엔티티 (필요할 때만)

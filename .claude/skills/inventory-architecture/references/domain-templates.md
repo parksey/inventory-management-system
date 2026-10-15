@@ -218,7 +218,7 @@ public class InventoryService {
 
     private Inventory getForUpdate(final Long productId) {
         return inventoryRepository.findByProductIdForUpdate(productId)
-                // 상품이 있는데 재고 행이 없으면 데이터 손상 → 비즈니스 예외가 아니라 500 (DECISIONS B2)
+                // 상품이 있는데 재고 행이 없으면 데이터 손상 → 비즈니스 예외가 아니라 500
                 .orElseThrow(() -> new IllegalStateException("재고 행이 없습니다. productId=" + productId));
     }
 }
