@@ -227,7 +227,8 @@ public class InventoryService {
         // 상품 (Product) — 없으면 수량 0인 재고와 함께 등록
         final Product product = productRegistrar.getOrRegister(command.productCode());
         // 재고 (Inventory) — 행 잠금 후 증가
-        final StockChange change = getForUpdate(product.getId()).increase(command.quantity());   // 규칙은 엔티티가
+        final Inventory inventory = getInventoryForUpdate(product.getId());
+        final StockChange change = inventory.increase(command.quantity());   // 규칙은 엔티티가
         // 원장 (StockTransaction)
         stockTransactionStore.save(StockTransaction.record(change, command.requesterId()));
     }
@@ -238,13 +239,14 @@ public class InventoryService {
         final Product product = productStore.findByProductCode(command.productCode())
                 .orElseThrow(() -> BusinessException.of(PRODUCT_NOT_FOUND, "productCode=" + command.productCode().value()));
         // 재고 (Inventory) — 행 잠금 후 감소
-        final StockChange change = getForUpdate(product.getId()).decrease(command.quantity());
+        final Inventory inventory = getInventoryForUpdate(product.getId());
+        final StockChange change = inventory.decrease(command.quantity());
         // 원장 (StockTransaction)
         stockTransactionStore.save(StockTransaction.record(change, command.requesterId()));
     }
 
     // 입고와 출고가 함께 쓴다. 상품이 있는데 재고 행이 없으면 데이터 손상 → 비즈니스 예외가 아니라 500
-    private Inventory getForUpdate(final Long productId) {
+    private Inventory getInventoryForUpdate(final Long productId) {
         return inventoryStore.findByProductIdForUpdate(productId)
                 .orElseThrow(() -> new IllegalStateException("상품은 있는데 재고 행이 없습니다. productId=" + productId));
     }
