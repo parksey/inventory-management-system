@@ -65,13 +65,13 @@ CREATE TABLE inventory (
 **도메인** (`inventory/core`)
 | 패키지 | 클래스 | 역할 |
 |---|---|---|
-| `product` | `ProductCode` (VO, record) | 형식 검증 (R1) |
-| `product` | `Product` (엔티티) | `id`, `productCode`, `name`. 조회에 필요한 필드만 매핑 |
-| `product` | `ProductRepository` | `findByProductCode(ProductCode)` |
-| `inventory` | `Quantity` (VO, record) | 0 이상 검증 (R2) |
-| `inventory` | `Inventory` (엔티티) | `productId`, `quantity`. `Product`는 객체가 아니라 `productId`로 참조 |
-| `inventory` | `InventoryRepository` | `findByProductId(Long)` |
-| `inventory` | `InventoryService` | `getStock(ProductCode)` → `StockResult(productCode, name, quantity)` |
+| `product.entity` | `ProductCode` (VO, record) | 형식 검증 (R1) |
+| `product.entity` | `Product` (엔티티) | `id`, `productCode`, `name`. 조회에 필요한 필드만 매핑 |
+| `inventory.entity` | `Quantity` (VO, record) | 0 이상 검증 (R2) |
+| `inventory.entity` | `Inventory` (엔티티) | `productId`, `quantity`. `Product`는 객체가 아니라 `productId`로 참조 |
+| `inventory.port` | `InventoryStore` | `findStockByProductCode(ProductCode)` → `Optional<StockResult>`. 상품과 재고를 조인해 상품 코드, 상품명, 수량만 읽는 조회 전용 projection |
+| `inventory` | `InventoryService` | `getStock(ProductCode)` → `StockResult` |
+| `inventory.model` | `StockResult` (record) | `productCode`, `name`, `quantity`. 서비스 결과이자 조인 projection 결과 |
 | `common` | `BaseTimeEntity` | `@MappedSuperclass`. `@PrePersist`에서 `createdAt`만, `@PreUpdate`에서 `updatedAt`만 채운다. `Product`, `Inventory`가 상속 |
 | `common` | `BusinessException`, `ErrorCode`, `ErrorKind` | 비즈니스 예외 |
 
@@ -79,7 +79,7 @@ CREATE TABLE inventory (
 
 상품과 재고를 새로 만드는 메서드(`Product.register`, `Inventory.create`)와 상품명 검증은 이 이슈에 넣지 않는다. #7은 조회만 하고 테스트 데이터는 SQL로 넣어서 부르는 곳이 없다. 처음 쓰는 입고 이슈에서 함께 추가한다. 입고, 출고에 필요한 에러 코드도 그 이슈에서 추가한다.
 
-**db** (`inventory/db`): `ProductJpaRepository`, `ProductRepositoryAdapter`, `InventoryJpaRepository`, `InventoryRepositoryAdapter` (package-private)
+**db** (`inventory/db`): `InventoryJpaRepository`(조인 JPQL), `InventoryStoreAdapter` (package-private). 상품만 따로 읽는 `ProductStore`는 #7에서 쓰는 곳이 없어 입고 이슈에서 추가한다
 
 **API** (`app`)
 
@@ -91,11 +91,14 @@ CREATE TABLE inventory (
 | 없는 상품 | 404 | `ProblemDetail` + `"code": "PRODUCT_NOT_FOUND"` |
 | 형식이 틀린 코드 | 400 | `ProblemDetail` + `"code": "INVALID_PRODUCT_CODE"` |
 
+- `/api`는 `application.yml`의 `server.servlet.context-path: /api`가 붙이고, 컨트롤러는 `/v1/inventory`만 갖는다. actuator와 Swagger도 함께 `/api` 아래로 간다(헬스 체크 `/api/actuator/health`).
 - 경로를 `inventory` 아래에 두는 이유: 이 API가 돌려주는 것은 상품 정보가 아니라 재고이고, 입고, 출고 API도 같은 경로 아래로 모인다. `v1`은 응답 형식이 바뀔 때 기존 클라이언트를 깨지 않고 새 버전을 낼 수 있게 붙인다.
 - `GlobalExceptionHandler`는 `BusinessException`만 처리한다. `ErrorKind` → HTTP 상태 매핑(`ErrorStatusMapper`)은 4종을 모두 둔다 (`default` 없는 switch라 하나라도 빠지면 컴파일 에러).
 - 표준 MVC 예외, 락 대기 초과, 500 응답 형식은 공통 에러 응답 이슈 범위라 여기서는 다루지 않는다.
 
-**흐름**: `@Transactional(readOnly = true)` 안에서 상품 코드로 상품 조회 → 없으면 `PRODUCT_NOT_FOUND` → 상품 id로 재고 조회 → 응답. 조회만 하므로 락은 걸지 않는다.
+**흐름**: `@Transactional(readOnly = true)` 안에서 상품과 재고를 한 쿼리로 조인해 읽는다 → 결과가 없으면 `PRODUCT_NOT_FOUND`. 조회만 하므로 락은 걸지 않는다.
+- 한 쿼리로 읽는 이유: 상품과 재고는 생명주기가 같다. 입고가 둘을 한 트랜잭션에서 함께 만들고, 재고는 상품 없이 존재할 수 없다(외래 키). 응답에 필요한 값도 상품 코드, 상품명, 수량 셋뿐이라 엔티티 두 개를 따로 읽을 이유가 없다.
+- 재고를 바꾸는 입고, 출고는 이 projection이 아니라 재고 엔티티를 잠그고 엔티티 메서드로 바꾼다.
 
 ### 비즈니스 규칙
 - R1. 상품 코드는 영문 대문자, 숫자, 하이픈으로 된 1~64자다. 소문자를 대문자로 바꿔 주지 않고 거절한다.
@@ -112,7 +115,7 @@ CREATE TABLE inventory (
 |---|---|
 | 상품 코드 형식이 틀림 (소문자, 공백, 65자 이상) | 400 `INVALID_PRODUCT_CODE` |
 | 등록되지 않은 상품 코드 | 404 `PRODUCT_NOT_FOUND` |
-| 상품은 있는데 재고 행이 없음 | 데이터 손상이라 비즈니스 예외가 아닌 `IllegalStateException` → 500 (응답 형식은 공통 에러 응답 이슈에서) |
+| 상품은 있는데 재고 행이 없음 | 조인 결과가 없어 404 `PRODUCT_NOT_FOUND`. 입고가 둘을 함께 만들어 정상 흐름에서는 생기지 않는다 |
 | 같은 상품 코드 INSERT, 음수 수량 저장 | DB가 제약 위반으로 거절 |
 
 ### 테스트 케이스
@@ -137,7 +140,7 @@ CREATE TABLE inventory (
 |---|---|---|---|
 | 1 | `feat/7-inventory-schema` | 명세서, 스키마 마이그레이션(`V7_1`), DB 제약 테스트 (`Refs #7`) | TC-7-05 ~ TC-7-07 |
 | 2 | `refactor/7-inventory-modules` | 실행 모듈을 `app/api`에서 `app`으로 올리고, 도메인 모듈을 `inventory/core`, `inventory/db`, `inventory/schema`로 묶고 `V7_1`과 제약 테스트를 `inventory/schema`로 이동, `support/flyway`는 Flyway 실행 설정과 공용 기초 데이터용으로 변경, 아키텍처 규칙과 README 반영, 규칙의 SKU 표기를 productCode로 변경 (`Refs #7`) | 없음 (동작 변경 없음, TC-7-05 ~ 07이 새 위치에서 통과) |
-| 3 | `feat/7-inventory-query` | 도메인 모델(VO, 엔티티, `BaseTimeEntity`, 예외), Repository와 Adapter, 조회 서비스, 조회 API, 404/400 응답 (`Closes #7`) | TC-7-01 ~ TC-7-04, TC-7-08 ~ TC-7-10 |
+| 3 | `feat/7-inventory-query` | 도메인 모델(VO, 엔티티, `BaseTimeEntity`, 예외), Store와 Adapter, 조회 서비스, 조회 API, 404/400 응답 (`Closes #7`) | TC-7-01 ~ TC-7-04, TC-7-08 ~ TC-7-10 |
 
 - PR 2를 넣은 이유: 모듈마다 한 가지 책임만 갖도록 응집도를 높인다. `app`은 실행과 도메인 조립, `inventory/core`는 도메인 규칙, `inventory/db`는 저장 구현, `inventory/schema`는 테이블 정의만 맡는다. `support/flyway`에 도메인 테이블을 두면 공용 기초 데이터와 도메인 스키마가 한곳에 섞이고, 도메인이 늘면 모든 테이블 SQL이 한 모듈에 쌓인다. 도메인 코드를 처음 넣는 PR 3 전에 모듈 구조를 먼저 바꿔, 조회 기능 코드가 처음부터 새 구조에 들어가게 한다.
 - 나누는 이유: 스키마는 앱 코드 없이 SQL만으로 완결되고, DB 제약을 SQL로 직접 검증할 수 있다. PR 1만 머지돼도 노출되는 기능이 없어 단독으로 머지할 수 있다. 리뷰도 "테이블과 제약이 맞나"와 "도메인 규칙과 API 계약이 맞나"를 따로 본다.
@@ -152,3 +155,8 @@ CREATE TABLE inventory (
 - PR을 스키마와 기능(도메인 + API)으로 다시 나누고, `updated_at`은 수정 때만 채우도록 변경 (승인 전 보완)
 - 생성 메서드와 상품명 검증을 입고 이슈로 미루고 규칙, TC 번호를 다시 매김. 결정 필요 항목 확정 (승인 전 보완)
 - 모듈 구조 변경(PR 2)을 추가하고 조회 기능을 PR 3으로 이동. 스키마 위치를 `inventory/schema`로 변경 (PR 1 머지 후)
+- 도메인 저장 포트 이름을 `XxxRepository`에서 `XxxStore`로 변경. Spring Data의 `JpaRepository`와 이름이 겹치지 않게 하기 위해서 (PR 3)
+- 애그리거트 패키지 안을 `entity/`(엔티티와 VO), `port/`(저장 포트)로 나누고 서비스는 애그리거트 바로 아래에 두도록 변경 (PR 3)
+- 조회를 상품, 재고 두 번 읽기에서 조인 projection 한 쿼리로 변경. 상품과 재고의 생명주기가 같기 때문. 쓰는 곳이 없어진 `ProductStore`는 입고 이슈로 미룸 (PR 3)
+- 서비스 입출력 record(`StockResult`)를 `model/` 패키지로 분리. 엔티티(`entity/`)와 바깥에 보이는 데이터를 구분하기 위해서 (PR 3)
+- `/api` 접두사를 컨트롤러에서 `server.servlet.context-path`로 옮김. 헬스 체크 경로가 `/api/actuator/health`로 바뀌어 TC-1-01, TC-1-19의 호출 경로도 변경 (PR 3)
