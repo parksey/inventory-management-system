@@ -115,7 +115,6 @@ CREATE TABLE inventory (
 |---|---|
 | 상품 코드 형식이 틀림 (소문자, 공백, 65자 이상) | 400 `INVALID_PRODUCT_CODE` |
 | 등록되지 않은 상품 코드 | 404 `PRODUCT_NOT_FOUND` |
-| 상품은 있는데 재고 행이 없음 | 조인 결과가 없어 404 `PRODUCT_NOT_FOUND`. 입고가 둘을 함께 만들어 정상 흐름에서는 생기지 않는다 |
 | 같은 상품 코드 INSERT, 음수 수량 저장 | DB가 제약 위반으로 거절 |
 
 ### 테스트 케이스
