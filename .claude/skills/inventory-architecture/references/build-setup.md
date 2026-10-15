@@ -9,7 +9,7 @@
 ```kotlin
 // settings.gradle.kts
 rootProject.name = "inventory-management-system"
-include("app:api", "inventory-domain", "inventory-db", "support:flyway", "support:p6spy")
+include("app", "inventory:core", "inventory:db", "inventory:schema", "support:flyway", "support:p6spy")
 ```
 
 ```kotlin
@@ -20,7 +20,7 @@ plugins {
     id("io.spring.dependency-management") version "1.1.7" apply false
 }
 
-configure(subprojects.filter { it.childProjects.isEmpty() }) {   // 컨테이너 프로젝트(:app, :support) 제외
+configure(subprojects.filter { it.childProjects.isEmpty() }) {   // 컨테이너 프로젝트(:support, :inventory) 제외
     apply(plugin = "java-library")
     apply(plugin = "io.spring.dependency-management")
     // Java 21 toolchain, Boot BOM import, Lombok, spring-boot-starter-test, -parameters, JUnit Platform
@@ -28,33 +28,58 @@ configure(subprojects.filter { it.childProjects.isEmpty() }) {   // 컨테이너
 ```
 
 ```kotlin
-// inventory-domain/build.gradle.kts — Spring Data·웹·DB 드라이버 없음
+// inventory/build.gradle.kts — 도메인 컨테이너. 하위 모듈의 Gradle 좌표를 도메인별로 나눈다
+subprojects {
+    group = "${rootProject.group}.inventory"   // com.logistics.inventory:core — 다른 도메인의 :core와 겹치지 않게
+}
+```
+
+```kotlin
+// inventory/core/build.gradle.kts — Spring Data·웹·DB 드라이버 없음
+base { archivesName = "inventory-core" }   // 도메인 모듈은 jar 이름에 도메인을 붙인다
+
 dependencies {
     compileOnly("jakarta.persistence:jakarta.persistence-api")
     // compileOnly("org.hibernate.orm:hibernate-core")  // @Immutable 등 Hibernate 어노테이션이 필요할 때만
-    compileOnly("org.springframework:spring-context")   // 어노테이션만 쓴다. 런타임은 api가 제공
+    compileOnly("org.springframework:spring-context")   // 어노테이션만 쓴다. 런타임은 app이 제공
     compileOnly("org.springframework:spring-tx")
 }
 ```
 
 ```kotlin
-// inventory-db/build.gradle.kts
+// inventory/db/build.gradle.kts
+base { archivesName = "inventory-db" }
+
 dependencies {
-    compileOnly(project(":inventory-domain"))     // 실행 시점 domain은 실행 모듈(api)이 넣는다
+    compileOnly(project(":inventory:core"))     // 실행 시점 domain은 실행 모듈(app)이 넣는다
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     runtimeOnly("org.postgresql:postgresql")
     testRuntimeOnly(project(":support:flyway"))   // 테스트 스키마 = 운영 마이그레이션 SQL
-    // db 테스트를 추가할 때: testImplementation(project(":inventory-domain")) (compileOnly는 test로 상속되지 않는다), spring-boot-starter-data-jpa-test(@DataJpaTest), spring-boot-testcontainers, testcontainers-postgresql
+    testRuntimeOnly(project(":inventory:schema"))
+    // db 테스트를 추가할 때: testImplementation(project(":inventory:core")) (compileOnly는 test로 상속되지 않는다), spring-boot-starter-data-jpa-test(@DataJpaTest), spring-boot-testcontainers, testcontainers-postgresql
 }
 ```
 
 ```kotlin
-// support/flyway/build.gradle.kts — Java 코드 없이 SQL 리소스와 Flyway 의존성만
+// inventory/schema/build.gradle.kts — 재고 도메인 테이블 SQL만. main 의존성 없음
+base { archivesName = "inventory-schema" }
+
+dependencies {
+    testImplementation(project(":support:flyway"))   // 마이그레이션을 적용해 제약을 SQL로 검증
+    testImplementation("org.testcontainers:testcontainers-postgresql")
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+    testRuntimeOnly("org.postgresql:postgresql")
+}
+// SQL 위치: inventory/schema/src/main/resources/db/migration/ (파일명 규칙은 docs/conventions/git.md §7)
+```
+
+```kotlin
+// support/flyway/build.gradle.kts — Java 코드 없이 Flyway 의존성과 공용 기초 데이터만
 dependencies {
     api("org.springframework.boot:spring-boot-starter-flyway")   // Boot 4부터 Flyway 자동 설정이 별도 모듈 (flyway-core만으로는 실행되지 않음)
     runtimeOnly("org.flywaydb:flyway-database-postgresql")
 }
-// SQL 위치: support/flyway/src/main/resources/db/migration/ (파일명 규칙은 docs/conventions/git.md §7)
+// 공용 기초 데이터 위치: support/flyway/src/main/resources/db/migration/ (도메인 테이블은 두지 않는다)
 ```
 
 ```kotlin
@@ -70,12 +95,13 @@ dependencies {
 ```
 
 ```kotlin
-// app/api/build.gradle.kts — 실행 가능한 jar는 api만 만든다
+// app/build.gradle.kts — 실행 가능한 jar는 app만 만든다
 plugins { id("org.springframework.boot") }
 
 dependencies {
-    implementation(project(":inventory-domain"))
-    runtimeOnly(project(":inventory-db"))       // 컴파일 시점에는 db 클래스를 볼 수 없다
+    implementation(project(":inventory:core"))
+    runtimeOnly(project(":inventory:db"))       // 컴파일 시점에는 db 클래스를 볼 수 없다
+    runtimeOnly(project(":inventory:schema"))   // 재고 도메인 테이블 마이그레이션
     runtimeOnly(project(":support:flyway"))     // 현재 모든 프로파일에서 앱 기동 시 마이그레이션 (Helm 도입 시 prod만 끈다)
     runtimeOnly(project(":support:p6spy"))      // 활성 여부는 decorator.datasource.enabled로 프로파일별 제어
     implementation("org.springframework.boot:spring-boot-starter-webmvc")   // Boot 4에서 starter-web의 새 이름
@@ -95,9 +121,9 @@ Boot 4에서 바뀐 import:
 
 ---
 
-## 2. application.yml (api 모듈) — 프로파일별 토글, Flyway 마이그레이션 이미지
+## 2. application.yml (app 모듈) — 프로파일별 토글, Flyway 마이그레이션 이미지
 
-설정은 소유자 기준으로 나눈다. **DataSource와 JPA 설정**은 `inventory-db/src/main/resources/inventory-db.yml`에 두고, 실행 단위마다 다른 값(접속 정보, 풀 크기)은 그 안에서 환경변수 placeholder로 받는다. 실행 모듈 `application.yml`에는 웹 계층 설정(`open-in-view`)과 프로파일 토글만 남긴다. db 쪽 파일을 `application.yml`로 만들면 클래스패스에서 api 파일에 가려져 조용히 무시되므로 이름을 달리하고 import한다. `application-db.yml`도 피한다 — `db` 프로파일 파일로 읽힌다.
+설정은 소유자 기준으로 나눈다. **DataSource와 JPA 설정**은 `inventory/db/src/main/resources/inventory-db.yml`에 두고, 실행 단위마다 다른 값(접속 정보, 풀 크기)은 그 안에서 환경변수 placeholder로 받는다. 실행 모듈 `application.yml`에는 웹 계층 설정(`open-in-view`)과 프로파일 토글만 남긴다. db 쪽 파일을 `application.yml`로 만들면 클래스패스에서 api 파일에 가려져 조용히 무시되므로 이름을 달리하고 import한다. `application-db.yml`도 피한다 — `db` 프로파일 파일로 읽힌다.
 
 프로파일은 `local`, `prod` 두 개다. **프로파일을 지정하지 않으면 local**(`spring.profiles.default: local`)이고, **운영은 Helm에서 `SPRING_PROFILES_ACTIVE=prod`로 반드시 명시**한다. 환경 토글(flyway, p6spy)은 공통 파일에 두지 않고 각 프로파일 파일에 명시한다. import한 파일도 프로파일 변형(`inventory-db-prod.yml`)이 자동으로 함께 로드되므로, db 모듈의 운영 전용 값은 거기에 둔다.
 
@@ -126,7 +152,7 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
 ---
-# application.yml (api 모듈, 공통 — 프로파일 없으면 local)
+# application.yml (app 모듈, 공통 — 프로파일 없으면 local)
 spring:
   profiles:
     default: local
@@ -162,5 +188,6 @@ Helm 차트를 도입할 때(아직 아님) `application-prod.yml`에 `spring.fl
 # Dockerfile.flyway — Helm pre-install/pre-upgrade Job용 이미지
 FROM flyway/flyway:12             # Boot BOM의 flyway-core 메이저 버전과 맞춘다 (로컬·테스트와 운영의 Flyway가 갈라지지 않게)
 COPY support/flyway/src/main/resources/db/migration /flyway/sql
+COPY inventory/schema/src/main/resources/db/migration /flyway/sql   # 도메인마다 schema 모듈의 SQL을 함께 복사
 # Job 커맨드: flyway -url=... -user=... -password=... migrate
 ```

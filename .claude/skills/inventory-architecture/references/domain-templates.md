@@ -154,9 +154,9 @@ package com.logistics.inventory.domain.product;
 
 public interface ProductRepository {
 
-    Optional<Product> findBySku(Sku sku);
+    Optional<Product> findByProductCode(ProductCode productCode);
 
-    /** 같은 SKU가 이미 있으면 기존 상품을, 없으면 저장한 상품을 반환한다. 동시 호출에도 한 건만 생긴다. */
+    /** 같은 상품 코드가 이미 있으면 기존 상품을, 없으면 저장한 상품을 반환한다. 동시 호출에도 한 건만 생긴다. */
     Product saveIfAbsent(Product product);
 }
 ```
@@ -167,10 +167,10 @@ public interface ProductRepository {
 ## 4. 서비스, Command/Result
 
 ```java
-public record InboundCommand(Sku sku, String name, Quantity quantity, String idempotencyKey) {}
-public record OutboundCommand(Sku sku, Quantity quantity, String idempotencyKey) {}
+public record InboundCommand(ProductCode productCode, String name, Quantity quantity, String idempotencyKey) {}
+public record OutboundCommand(ProductCode productCode, Quantity quantity, String idempotencyKey) {}
 
-public record StockChangeResult(Long transactionId, Sku sku, String name, StockChangeType type,
+public record StockChangeResult(Long transactionId, ProductCode productCode, String name, StockChangeType type,
                                 long quantity, long beforeQuantity, long afterQuantity,
                                 OffsetDateTime createdAt) {
     public static StockChangeResult of(final Product product, final StockTransaction transaction) { ... }
@@ -191,7 +191,7 @@ public class InventoryService {
     @Transactional
     public StockChangeResult inbound(final InboundCommand command) {
         // 상품 (Product)
-        final Product product = productRepository.saveIfAbsent(Product.register(command.sku(), command.name()));
+        final Product product = productRepository.saveIfAbsent(Product.register(command.productCode(), command.name()));
         // 재고 (Inventory) — 행 보장 후 잠금, 증가
         inventoryRepository.createIfAbsent(product.getId());
         final Inventory inventory = getForUpdate(product.getId());
@@ -205,8 +205,8 @@ public class InventoryService {
     @Transactional
     public StockChangeResult outbound(final OutboundCommand command) {
         // 상품 (Product)
-        final Product product = productRepository.findBySku(command.sku())
-                .orElseThrow(() -> BusinessException.of(PRODUCT_NOT_FOUND, "sku=" + command.sku().value()));
+        final Product product = productRepository.findByProductCode(command.productCode())
+                .orElseThrow(() -> BusinessException.of(PRODUCT_NOT_FOUND, "productCode=" + command.productCode().value()));
         // 재고 (Inventory) — 행 잠금 후 감소
         final Inventory inventory = getForUpdate(product.getId());
         final StockChange change = inventory.decrease(command.quantity());
@@ -233,7 +233,7 @@ public class InventoryService {
 ```java
 package com.logistics.inventory.domain.common;
 
-// 도메인 개념의 에러 종류. HTTP 상태로의 매핑은 api가 한다 — 도메인은 웹을 모른다
+// 도메인 개념의 에러 종류. HTTP 상태로의 매핑은 app이 한다 — 도메인은 웹을 모른다
 public enum ErrorKind { INVALID, NOT_FOUND, CONFLICT, UNPROCESSABLE }
 
 ```
@@ -246,7 +246,7 @@ package com.logistics.inventory.domain.common;
 @Getter
 @RequiredArgsConstructor
 public enum ErrorCode {
-    INVALID_SKU("SKU 형식이 올바르지 않습니다.", ErrorKind.INVALID),
+    INVALID_PRODUCT_CODE("상품 코드 형식이 올바르지 않습니다.", ErrorKind.INVALID),
     INVALID_PRODUCT_NAME("상품명이 올바르지 않습니다.", ErrorKind.INVALID),
     INVALID_QUANTITY("수량이 올바르지 않습니다.", ErrorKind.INVALID),
     PRODUCT_NOT_FOUND("상품을 찾을 수 없습니다.", ErrorKind.NOT_FOUND),
@@ -289,7 +289,7 @@ throw BusinessException.of(INSUFFICIENT_STOCK,
 // getMessage() → "재고가 부족합니다. productId=1, 현재=3, 요청=5", 응답 code → "INSUFFICIENT_STOCK"
 ```
 
-**컴파일러가 막는 것**: enum 안의 code 중복(상수 이름), 종류 누락(생성자 인자), 문자열 code로 던지기(`of`는 `ErrorCode`만 받음), 종류별 HTTP 매핑 누락(api의 `default` 없는 switch).
+**컴파일러가 막는 것**: enum 안의 code 중복(상수 이름), 종류 누락(생성자 인자), 문자열 code로 던지기(`of`는 `ErrorCode`만 받음), 종류별 HTTP 매핑 누락(app의 `default` 없는 switch).
 **컴파일러가 못 막는 것**: 상수 이름 변경(= 외부 계약 변경) → API 테스트가 `$.code`를 **문자열 리터럴**로 검증해서 잡는다. 테스트에서 enum 상수를 참조하면 IDE rename에 같이 바뀌어 잡지 못한다.
 
 - 종류(kind)는 enum이 정한다. 던지는 쪽이 `conflict(...)`처럼 종류를 고르지 않는다 — 같은 code가 호출 경로에 따라 다른 HTTP 상태로 나가면 클라이언트가 code를 믿고 분기할 수 없다.

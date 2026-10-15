@@ -1,4 +1,4 @@
-# 코드 템플릿 — db·api (어댑터)
+# 코드 템플릿 — db, app (어댑터)
 
 ---
 
@@ -61,7 +61,7 @@ class JpaConfig {}
 
 ---
 
-## 2. api — Controller, Request/Response
+## 2. app — Controller, Request/Response
 
 ```java
 package com.logistics.inventory.api.inventory;
@@ -85,14 +85,14 @@ public class InventoryController {
 
 ```java
 public record InboundRequest(
-        @NotBlank String sku,
+        @NotBlank String productCode,
         @NotBlank String name,
         @NotNull @Positive Long quantity
 ) {
 
     public InboundCommand toCommand(final String idempotencyKey) {
         return new InboundCommand(
-                new Sku(sku), 
+                new ProductCode(productCode), 
                 name, 
                 new Quantity(quantity), 
                 idempotencyKey
@@ -102,7 +102,7 @@ public record InboundRequest(
 
 public record StockChangeResponse(
         Long transactionId,
-        String sku,
+        String productCode,
         String name,
         String type,
         long quantity,
@@ -125,7 +125,7 @@ public class InventoryApplication {
 
 ---
 
-## 3. api — 예외 핸들러
+## 3. app — 예외 핸들러
 
 여기서는 모양만 둔다. 세부 매핑은 에러 응답 이슈의 명세서에서 정한다.
 
@@ -146,7 +146,7 @@ final class ErrorStatusMapper {
     }
 }
 
-// 도메인 밖 오류의 code. api 모듈이라 HTTP 상태를 직접 가진다 (ErrorKind로는 405·415·503·500을 표현할 수 없다)
+// 도메인 밖 오류의 code. app 모듈이라 HTTP 상태를 직접 가진다 (ErrorKind로는 405·415·503·500을 표현할 수 없다)
 @Getter
 @RequiredArgsConstructor
 public enum ApiErrorCode {
