@@ -38,7 +38,7 @@ class ProductInventorySchemaTest {
 
     @BeforeEach
     void clean() throws SQLException {
-        execute("TRUNCATE inventory, product RESTART IDENTITY");
+        execute("TRUNCATE stock_transaction, inventory, product RESTART IDENTITY");
     }
 
     @Test
