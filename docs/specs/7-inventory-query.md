@@ -15,7 +15,7 @@
 
 ### 설계
 
-**데이터** — 상품과 재고를 1:1 두 테이블로 나눈다 (`V7_1__create_product_inventory.sql`)
+**데이터** — 상품과 재고를 1:1 두 테이블로 나눈다 (`inventory/schema`의 `V7_1__create_product_inventory.sql`)
 
 ```sql
 CREATE TABLE product (
@@ -62,7 +62,7 @@ CREATE TABLE inventory (
 - 잠금 순서, 애그리거트 간 참조 등 아키텍처 규칙이 `productId` 기준이다.
 - 테넌트를 도입하면 상품 코드만으로는 고유하지 않게 된다. PK가 `id`라서 그때도 UNIQUE 제약만 바꾸면 되고, 상품을 참조하는 테이블은 그대로다.
 
-**도메인** (`inventory-domain`)
+**도메인** (`inventory/core`)
 | 패키지 | 클래스 | 역할 |
 |---|---|---|
 | `product` | `ProductCode` (VO, record) | 형식 검증 (R1) |
@@ -79,9 +79,9 @@ CREATE TABLE inventory (
 
 상품과 재고를 새로 만드는 메서드(`Product.register`, `Inventory.create`)와 상품명 검증은 이 이슈에 넣지 않는다. #7은 조회만 하고 테스트 데이터는 SQL로 넣어서 부르는 곳이 없다. 처음 쓰는 입고 이슈에서 함께 추가한다. 입고, 출고에 필요한 에러 코드도 그 이슈에서 추가한다.
 
-**db** (`inventory-db`): `ProductJpaRepository`, `ProductRepositoryAdapter`, `InventoryJpaRepository`, `InventoryRepositoryAdapter` (package-private)
+**db** (`inventory/db`): `ProductJpaRepository`, `ProductRepositoryAdapter`, `InventoryJpaRepository`, `InventoryRepositoryAdapter` (package-private)
 
-**API** (`app/api`)
+**API** (`app`)
 
 `GET /api/v1/inventory/{productCode}`
 
@@ -129,15 +129,17 @@ CREATE TABLE inventory (
 | TC-7-09 | R7 | 상품 없음 | `GET /api/v1/inventory/NOT-EXIST` | 404, `code` = `"PRODUCT_NOT_FOUND"` | 통합 (HTTP) |
 | TC-7-10 | R1 | | `GET /api/v1/inventory/ts-basic` | 400, `code` = `"INVALID_PRODUCT_CODE"` | 통합 (HTTP) |
 
-- TC-7-05 ~ 07은 앱을 거치지 않고 SQL로 직접 넣어, 앱 검증이 없어도 DB가 막는지 확인한다. `flyway` 모듈 테스트에서 실제 마이그레이션을 적용한 PostgreSQL로 검증한다.
+- TC-7-05 ~ 07은 앱을 거치지 않고 SQL로 직접 넣어, 앱 검증이 없어도 DB가 막는지 확인한다. `inventory/schema` 모듈 테스트에서 실제 마이그레이션을 적용한 PostgreSQL로 검증한다.
 - 엔티티와 스키마가 맞는지는 기존 기동 테스트(TC-1-01)가 `ddl-auto=validate`로 함께 확인한다.
 
 ### PR 계획
 | PR | 브랜치 | 범위 | 포함 테스트 케이스 |
 |---|---|---|---|
 | 1 | `feat/7-inventory-schema` | 명세서, 스키마 마이그레이션(`V7_1`), DB 제약 테스트 (`Refs #7`) | TC-7-05 ~ TC-7-07 |
-| 2 | `feat/7-inventory-query` | 도메인 모델(VO, 엔티티, `BaseTimeEntity`, 예외), Repository와 Adapter, 조회 서비스, 조회 API, 404/400 응답, 아키텍처 규칙의 SKU 표기를 productCode로 변경 (`Closes #7`) | TC-7-01 ~ TC-7-04, TC-7-08 ~ TC-7-10 |
+| 2 | `refactor/7-inventory-modules` | 실행 모듈을 `app/api`에서 `app`으로 올리고, 도메인 모듈을 `inventory/core`, `inventory/db`, `inventory/schema`로 묶고 `V7_1`과 제약 테스트를 `inventory/schema`로 이동, `support/flyway`는 Flyway 실행 설정과 공용 기초 데이터용으로 변경, 아키텍처 규칙과 README 반영, 규칙의 SKU 표기를 productCode로 변경 (`Refs #7`) | 없음 (동작 변경 없음, TC-7-05 ~ 07이 새 위치에서 통과) |
+| 3 | `feat/7-inventory-query` | 도메인 모델(VO, 엔티티, `BaseTimeEntity`, 예외), Repository와 Adapter, 조회 서비스, 조회 API, 404/400 응답 (`Closes #7`) | TC-7-01 ~ TC-7-04, TC-7-08 ~ TC-7-10 |
 
+- PR 2를 넣은 이유: 모듈마다 한 가지 책임만 갖도록 응집도를 높인다. `app`은 실행과 도메인 조립, `inventory/core`는 도메인 규칙, `inventory/db`는 저장 구현, `inventory/schema`는 테이블 정의만 맡는다. `support/flyway`에 도메인 테이블을 두면 공용 기초 데이터와 도메인 스키마가 한곳에 섞이고, 도메인이 늘면 모든 테이블 SQL이 한 모듈에 쌓인다. 도메인 코드를 처음 넣는 PR 3 전에 모듈 구조를 먼저 바꿔, 조회 기능 코드가 처음부터 새 구조에 들어가게 한다.
 - 나누는 이유: 스키마는 앱 코드 없이 SQL만으로 완결되고, DB 제약을 SQL로 직접 검증할 수 있다. PR 1만 머지돼도 노출되는 기능이 없어 단독으로 머지할 수 있다. 리뷰도 "테이블과 제약이 맞나"와 "도메인 규칙과 API 계약이 맞나"를 따로 본다.
 
 ### 결정 필요
@@ -149,3 +151,4 @@ CREATE TABLE inventory (
 - 상품 코드는 전체 고유로 두고 테넌트별 고유는 범위 밖으로 명시, SKU 용어 설명 제거 (승인 전 보완)
 - PR을 스키마와 기능(도메인 + API)으로 다시 나누고, `updated_at`은 수정 때만 채우도록 변경 (승인 전 보완)
 - 생성 메서드와 상품명 검증을 입고 이슈로 미루고 규칙, TC 번호를 다시 매김. 결정 필요 항목 확정 (승인 전 보완)
+- 모듈 구조 변경(PR 2)을 추가하고 조회 기능을 PR 3으로 이동. 스키마 위치를 `inventory/schema`로 변경 (PR 1 머지 후)

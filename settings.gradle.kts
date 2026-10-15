@@ -1,9 +1,10 @@
 rootProject.name = "inventory-management-system"
 
 include(
-    "app:api",
-    "inventory-domain",
-    "inventory-db",
+    "app",
+    "inventory:core",
+    "inventory:db",
+    "inventory:schema",
     "support:flyway",
     "support:p6spy",
 )

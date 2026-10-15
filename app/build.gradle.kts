@@ -3,10 +3,14 @@ plugins {
 }
 
 dependencies {
-    implementation(project(":inventory-domain"))
-    runtimeOnly(project(":inventory-db"))       // 컴파일 시점에는 db 클래스를 볼 수 없다
-    runtimeOnly(project(":support:flyway"))     // 실행 여부는 spring.flyway.enabled로 프로파일별 제어
-    runtimeOnly(project(":support:p6spy"))      // 활성 여부는 decorator.datasource.enabled로 프로파일별 제어
+    // inventory
+    implementation(project(":inventory:core"))
+    runtimeOnly(project(":inventory:db"))
+    runtimeOnly(project(":inventory:schema"))
+
+    // support
+    runtimeOnly(project(":support:flyway"))
+    runtimeOnly(project(":support:p6spy"))
 
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-validation")
