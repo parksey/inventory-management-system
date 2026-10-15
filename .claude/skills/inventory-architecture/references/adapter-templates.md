@@ -27,7 +27,7 @@ interface InventoryJpaRepository extends JpaRepository<Inventory, Long> {
 ```java
 @Repository
 @RequiredArgsConstructor
-class InventoryRepositoryAdapter implements InventoryRepository {
+class InventoryStoreAdapter implements InventoryStore {
 
     private final InventoryJpaRepository inventoryJpaRepository;
 
@@ -67,7 +67,7 @@ class JpaConfig {}
 package com.logistics.inventory.api.inventory;
 
 @RestController
-@RequestMapping("/api/v1/inventory")
+@RequestMapping("/v1/inventory")   // /api는 server.servlet.context-path가 붙인다
 @RequiredArgsConstructor
 public class InventoryController {
 

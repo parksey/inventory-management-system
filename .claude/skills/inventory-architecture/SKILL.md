@@ -14,7 +14,7 @@ description: 재고 관리 시스템 프로젝트의 아키텍처·도메인 설
 - 배포 전제: Helm으로 **다중 Pod scale-out** → 동시성·정합성은 반드시 DB 레벨에서 보장
 - 코드 예시 — 작업에 해당하는 파일만 읽는다. 이름·필드는 요구에 맞게 바꾸되 **구조(어느 모듈, 무엇이 무엇을 호출하는지)는 바꾸지 않는다**:
   - 빌드 스크립트·모듈 의존성·p6spy 설정·application.yml·Flyway 마이그레이션 이미지: `references/build-setup.md`
-  - VO·엔티티·Repository 인터페이스·서비스·Command/Result·예외/ErrorCode: `references/domain-templates.md`
+  - VO·엔티티·Store 인터페이스·서비스·Command/Result·예외/ErrorCode: `references/domain-templates.md`
   - db Adapter·JPA 설정·Controller·Request/Response·예외 핸들러: `references/adapter-templates.md`
 
 ---
@@ -48,8 +48,8 @@ description: 재고 관리 시스템 프로젝트의 아키텍처·도메인 설
 | 모듈 | 담는 것 | 허용 의존성 |
 |---|---|---|
 | `app` | **유일한 실행 모듈(bootJar)**. 모든 도메인을 조립하는 곳. `@SpringBootApplication`, Controller, 요청/응답 DTO, `GlobalExceptionHandler`, 웹 설정, `application.yml` | `implementation(project(":inventory:core"))`, `runtimeOnly(project(":inventory:db"))`, `runtimeOnly(project(":inventory:schema"))`, `runtimeOnly(project(":support:flyway"))`, `runtimeOnly(project(":support:p6spy"))`, spring-boot-starter-webmvc, validation, actuator, spring-tx(`org.springframework.dao` 예외 매핑용) |
-| `domain` | 엔티티(JPA 어노테이션 포함), VO, Repository **인터페이스**, 도메인/애플리케이션 서비스, Command·Result, 도메인 예외·ErrorCode | `compileOnly` jakarta.persistence-api, spring-context, spring-tx (Hibernate 어노테이션이 필요하면 `compileOnly` hibernate-core) |
-| `db` | Spring Data JPA Repository, domain Repository 인터페이스의 구현체(Adapter), native query, JPA·DataSource 설정, `inventory-db.yml`(DataSource와 JPA 설정, 실행 단위별 값은 환경변수로) | `compileOnly(project(":inventory:core"))`(실행 시점 domain은 app이 넣는다), spring-boot-starter-data-jpa, postgresql, `testRuntimeOnly(project(":support:flyway"))`, `testRuntimeOnly(project(":inventory:schema"))` |
+| `domain` | 엔티티(JPA 어노테이션 포함), VO, Store(저장 포트) **인터페이스**, 도메인/애플리케이션 서비스, Command·Result, 도메인 예외·ErrorCode | `compileOnly` jakarta.persistence-api, spring-context, spring-tx (Hibernate 어노테이션이 필요하면 `compileOnly` hibernate-core) |
+| `db` | Spring Data JPA Repository, domain Store 인터페이스의 구현체(Adapter), native query, JPA·DataSource 설정, `inventory-db.yml`(DataSource와 JPA 설정, 실행 단위별 값은 환경변수로) | `compileOnly(project(":inventory:core"))`(실행 시점 domain은 app이 넣는다), spring-boot-starter-data-jpa, postgresql, `testRuntimeOnly(project(":support:flyway"))`, `testRuntimeOnly(project(":inventory:schema"))` |
 | `schema` | **이 도메인 테이블의 단일 원천**. `db/migration/V*__*.sql`만. main에 Java 코드 없음 (테스트는 Testcontainers PostgreSQL에 마이그레이션을 적용해 제약을 SQL로 검증) | main 의존성 없음. 테스트만 `support:flyway`, testcontainers-postgresql |
 | `flyway` | Flyway 실행 의존성과 **도메인에 속하지 않는 공용 기초 데이터**(`db/migration`). 도메인 테이블은 두지 않는다. main에 Java 코드 없음 (테스트는 Testcontainers PostgreSQL로 마이그레이션 적용을 검증) | spring-boot-starter-flyway(Boot 4부터 Flyway 자동 설정이 별도 모듈), flyway-database-postgresql |
 | `p6spy` | SQL 로깅. p6spy 스타터, SQL 포매터(`PrettySqlFormatter`), 포매터를 등록하는 AutoConfiguration(`META-INF/spring/...AutoConfiguration.imports`) | p6spy-spring-boot-starter, `compileOnly` spring-boot-autoconfigure, hibernate-core(포매터용) |
@@ -72,12 +72,17 @@ description: 재고 관리 시스템 프로젝트의 아키텍처·도메인 설
 ### 패키지 배치
 ```
 inventory/core/    com.logistics.inventory.domain
-  ├─ product/        Product(엔티티), ProductCode(VO), ProductRepository(인터페이스), ...
-  ├─ inventory/      Inventory, Quantity, InventoryRepository, InventoryService, Command/Result, ...
-  ├─ transaction/    StockTransaction(원장), StockTransactionRepository, ...
+  ├─ product/
+  │    ├─ entity/    Product(엔티티), ProductCode(VO)
+  │    └─ port/      ProductStore(저장 포트 인터페이스)
+  ├─ inventory/      InventoryService
+  │    ├─ entity/    Inventory, Quantity
+  │    ├─ model/     Command/Result (StockResult 등, 바깥과 주고받는 record)
+  │    └─ port/      InventoryStore
+  ├─ transaction/    (같은 모양) entity/StockTransaction(원장), port/StockTransactionStore
   └─ common/         BusinessException, ErrorKind, ErrorCode, BaseTimeEntity 등 공통
 inventory/db/      com.logistics.inventory.db
-  ├─ product/        ProductJpaRepository, ProductRepositoryAdapter
+  ├─ product/        ProductJpaRepository, ProductStoreAdapter
   ├─ inventory/      ...
   └─ config/         JpaConfig (@EntityScan("...domain"), @EnableJpaRepositories("...db"))
 inventory/schema/  src/main/resources/db/migration/   V{이슈번호}_{순번}__{설명}.sql — 예: V7_1__create_product_inventory.sql (Java 코드 없음)
@@ -89,7 +94,7 @@ app/               com.logistics.inventory.api
   ├─ InventoryApplication (scanBasePackages = "com.logistics.inventory")
   └─ resources/      application.yml, application-local.yml, application-prod.yml
 ```
-패키지는 레이어(service/, repository/)가 아니라 **도메인(애그리거트) 단위**로 나눈다 — 관련 코드가 한곳에 모여야 경계가 보인다.
+패키지는 레이어(service/, repository/)가 아니라 **도메인(애그리거트) 단위**로 먼저 나눈다 — 관련 코드가 한곳에 모여야 경계가 보인다. 애그리거트 안에서는 `entity/`(엔티티와 그 VO, 도메인 안에서만 쓴다), `model/`(Command, Result처럼 app과 db가 주고받는 입출력 record), `port/`(db가 구현할 저장 포트)로 나누고, 서비스는 애그리거트 패키지 바로 아래에 둔다. 바깥 모듈이 보는 것(`model/`, `port/`)과 도메인 내부(`entity/`)가 패키지 이름으로 구분된다.
 
 ---
 
@@ -147,35 +152,36 @@ Response DTO ◄──from(result)── Result ◄─────┘
 ### 3.5 애그리거트 사이의 협력
 - **흐름은 유스케이스 서비스가, 규칙은 애그리거트가.** 한 애그리거트 안의 로직은 엔티티·VO에 위임하고, 서비스는 여러 애그리거트를 어떤 순서로 부를지만 정한다.
 - 애그리거트끼리는 **ID나 VO만** 주고받는다. 애그리거트 A의 엔티티를 B의 메서드에 넘기지 않는다.
-- 애그리거트 A의 도메인 로직 안에서 B의 Repository를 부르지 않는다. 여러 애그리거트의 Repository를 함께 쓰는 곳은 유스케이스 서비스뿐이다.
+- 애그리거트 A의 도메인 로직 안에서 B의 Store를 부르지 않는다. 여러 애그리거트의 Store를 함께 쓰는 곳은 유스케이스 서비스뿐이다.
 - 서비스 메서드에서 애그리거트 경계가 바뀌는 지점에 한 줄 한국어 코멘트를 단다.
   ```java
   // 상품 (Product)
-  final Product product = productRepository.saveIfAbsent(Product.register(command.productCode(), command.name()));
+  final Product product = productStore.saveIfAbsent(Product.register(command.productCode(), command.name()));
   // 재고 (Inventory) — 행 잠금 후 증가
   final Inventory inventory = getForUpdate(product.getId());
   final StockChange change = inventory.increase(command.quantity());
   // 원장 (StockTransaction)
-  stockTransactionRepository.save(StockTransaction.record(change, command.idempotencyKey()));
+  stockTransactionStore.save(StockTransaction.record(change, command.idempotencyKey()));
   ```
 - **일급 컬렉션**: 같은 스트림 필터·검사를 두 번 이상 쓰게 되면 `List<X>` 대신 컬렉션 클래스로 뽑고 도메인 의미가 있는 메서드를 둔다.
 
 ### 3.6 쓰지 않는 패턴
 | 패턴 | 이유 |
 |---|---|
-| 구현이 하나뿐인 서비스에 인터페이스(`XxxUseCase`) | 포트는 실제 인프라 경계(Repository 등)에만 둔다. 가짜 추상화는 읽을 파일만 늘린다 |
+| 구현이 하나뿐인 서비스에 인터페이스(`XxxUseCase`) | 포트는 실제 인프라 경계(Store 등)에만 둔다. 가짜 추상화는 읽을 파일만 늘린다 |
 | 한 줄짜리 wrapper, 한 군데서만 쓰는 의미 없는 private helper | 인라인한다. helper는 중복을 없애면서 도메인 의미를 주는 것만 남긴다 (`getForUpdate` 같은) |
 | 서비스의 읽기 전용 사전 검증(`assertXxx`) 후 별도 변경 | 락 없이 검증하고 나중에 바꾸면 그 사이에 다른 Pod가 값을 바꿀 수 있다. 불변식은 **락을 잡은 뒤 엔티티 메서드 안에서** 검증한다 |
 | 여러 애그리거트를 한 번에 검사하는 Checker 클래스 | 규칙의 주인이 흐려진다. 규칙은 각 애그리거트가 가진다 |
 
 ---
 
-## 4. Repository (포트와 어댑터)
+## 4. Store (포트와 어댑터)
 
-- 인터페이스는 `domain`에 도메인 언어로 정의한다: `InventoryRepository.findByProductIdForUpdate(...)`. Spring Data 타입(`Page`, `Specification` 등)을 도메인 인터페이스 시그니처에 노출하지 않는다.
+- 도메인의 저장 포트 이름은 `XxxStore`다. Spring Data의 `JpaRepository`, `@Repository`와 이름이 겹치지 않게 해서, 도메인 포트(`InventoryStore`), Spring Data 인터페이스(`InventoryJpaRepository`), 구현(`InventoryStoreAdapter`)이 이름만 보고 구분되게 한다.
+- 인터페이스는 `domain`에 도메인 언어로 정의한다: `InventoryStore.findByProductIdForUpdate(...)`. Spring Data 타입(`Page`, `Specification` 등)을 도메인 인터페이스 시그니처에 노출하지 않는다.
 - 구현은 `db`에 둔다:
   - `InventoryJpaRepository extends JpaRepository<Inventory, Long>` — Spring Data 인터페이스 (db 내부 전용, package-private 권장)
-  - `InventoryRepositoryAdapter implements InventoryRepository` — 도메인 인터페이스 구현, `@Repository`
+  - `InventoryStoreAdapter implements InventoryStore` — 도메인 인터페이스 구현, `@Repository`
 - native query·락 힌트·`ON CONFLICT` 같은 DB 특화 코드는 전부 `db`에만 있다.
 
 ---
