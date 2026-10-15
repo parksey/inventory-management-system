@@ -122,7 +122,9 @@ public record InboundRequest(
 }
 ```
 - 여러 API가 함께 쓰는 헤더 이름은 `app`의 `ApiHeaders`에 둔다 (`REQUESTER_ID = "X-User-Id"`). 테스트는 계약을 지키려고 헤더 이름을 문자열 리터럴로 쓴다.
-- 조회 응답은 `XxxResponse.from(result)` record로 만든다 (`StockResponse`).
+- 조회 응답은 `XxxResponse.from(...)` record로 만든다. 조인해서 읽은 결과는 Result를 받고(`StockResponse.from(StockResult)`), 연관이 없는 엔티티 하나를 읽은 결과는 엔티티를 받아 필드를 골라 옮긴다(`StockHistoryResponse.from(StockTransaction)`).
+- 목록 조회는 `ApiResponse<CursorResponse<XxxResponse>>`를 돌려준다: `ApiResponse.ok(CursorResponse.of(service.getHistory(code, new CursorQuery(cursor, size)), StockHistoryResponse::from))`. 파라미터는 `@RequestParam(required = false) @Min(1) Long cursor`, `@RequestParam(defaultValue = "20") @Min(1) int size`.
+- 어댑터는 `@Query`(`where ... and (:cursor is null or t.id < :cursor) order by t.id desc`) 하나를 `Limit.of(size + 1)`로 부르고, 남는 1건으로 `hasNext`를, 돌려줄 마지막 건의 `id`로 `nextCursor`를 정한다 (`StockTransactionStoreAdapter.findHistoryBy`).
 
 ```java
 @SpringBootApplication(scanBasePackages = "com.logistics.inventory")   // domain, db 빈까지 스캔
