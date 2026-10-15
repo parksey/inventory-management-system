@@ -1,3 +1,9 @@
+decorator:
+  datasource:
+    enabled: true
+    p6spy:
+      enable-logging: true
+
 logging:
   level:
     com.logistics.inventory: debug

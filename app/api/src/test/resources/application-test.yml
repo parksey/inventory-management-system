@@ -1,0 +1,6 @@
+# datasource는 @ServiceConnection이 주입한다 — url 등을 적지 않는다
+decorator:
+  datasource:
+    enabled: true
+    p6spy:
+      enable-logging: false       # 테스트 로그 노이즈 방지. 디버깅할 때만 true

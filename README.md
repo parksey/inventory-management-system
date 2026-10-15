@@ -15,6 +15,7 @@ Java 21 · Spring Boot · Spring Data JPA · PostgreSQL · Flyway · Gradle(Kotl
 | `inventory-domain` | 엔티티, VO, Repository 인터페이스, 서비스 |
 | `inventory-db` | Repository 구현 (JPA, native query) |
 | `support/flyway` | DB 마이그레이션 SQL (스키마의 단일 원천) |
+| `support/p6spy` | 로컬 SQL 로깅 (운영에서는 꺼짐) |
 
 ## 개발 프로세스
 - [작업 흐름](docs/conventions/workflow.md) — 요구사항 → 이슈 → 기능 명세서 → PR
