@@ -13,7 +13,7 @@ spring:
 server:
   shutdown: graceful
   servlet:
-    context-path: /api          # actuator, Swagger도 이 아래로 간다 (/api/actuator/health)
+    context-path: /api
 
 management:
   endpoints:
