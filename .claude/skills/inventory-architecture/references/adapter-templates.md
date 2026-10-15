@@ -74,11 +74,11 @@ public class InventoryController {
     private final InventoryService inventoryService;
 
     @PostMapping("/inbound")
-    public StockChangeResponse inbound(
+    public ApiResponse<StockChangeResponse> inbound(
             @RequestHeader(value = "Idempotency-Key", required = false) final String idempotencyKey,
             @Valid @RequestBody final InboundRequest request
     ) {
-        return StockChangeResponse.from(inventoryService.inbound(request.toCommand(idempotencyKey)));
+        return ApiResponse.ok(StockChangeResponse.from(inventoryService.inbound(request.toCommand(idempotencyKey))));   // 성공 응답도 공통 응답으로 감싼다
     }
 }
 ```
@@ -146,20 +146,16 @@ final class ErrorStatusMapper {
     }
 }
 
-// 도메인 밖 오류의 code. app 모듈이라 HTTP 상태를 직접 가진다 (ErrorKind로는 405·415·503·500을 표현할 수 없다)
-@Getter
-@RequiredArgsConstructor
-public enum ApiErrorCode {
-    INVALID_REQUEST(HttpStatus.BAD_REQUEST, "요청 값이 올바르지 않습니다."),
-    RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "요청한 경로를 찾을 수 없습니다."),
-    ...
-    LOCK_TIMEOUT(HttpStatus.SERVICE_UNAVAILABLE, "요청이 몰려 재고를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요."),
-    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다.");
+}
+```
 
-    private final HttpStatus status;
-    private final String message;
-
-    static ApiErrorCode from(final HttpStatusCode status) { ... }   // Spring 표준 예외용: 404·405·415·5xx, 나머지 INVALID_REQUEST
+```java
+// 성공과 에러가 같은 모양인 공통 응답. 클라이언트는 code로 분기한다
+public record ApiResponse<T>(int status, String code, String message, T data) {
+    public static <T> ApiResponse<T> ok(final T data) { return new ApiResponse<>(200, "SUCCESS", "success", data); }
+    static <T> ApiResponse<T> error(final HttpStatusCode status, final String code, final String message, final T data) { ... }
+    // 도메인 밖 에러: HTTP 상태 이름이 code, 상태 문구가 message (NOT_FOUND, "Not Found")
+    static <T> ApiResponse<T> error(final HttpStatus status, final T data) { return error(status, status.name(), status.getReasonPhrase(), data); }
 }
 ```
 
@@ -169,39 +165,38 @@ public enum ApiErrorCode {
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {   // 표준 MVC 예외 15여 종은 상위 클래스가 처리
 
     @ExceptionHandler(BusinessException.class)
-    public ProblemDetail handleBusiness(final BusinessException e, final HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Void>> handleBusiness(final BusinessException e, final HttpServletRequest request) {
         final ErrorCode errorCode = e.getErrorCode();
         log.warn("비즈니스 예외: code={}, path={}, detail={}", errorCode.name(), request.getRequestURI(), e.getMessage());
-        return ProblemDetailFactory.of(ErrorStatusMapper.toStatus(errorCode.getKind()), errorCode.name(), e.getMessage(), request.getRequestURI());
+        final HttpStatus status = ErrorStatusMapper.toStatus(errorCode.getKind());
+        return ResponseEntity.status(status).body(ApiResponse.error(status, errorCode.name(), e.getMessage(), null));
     }
 
     // 일시적 경합 → 503 + Retry-After (spring-tx의 org.springframework.dao 예외 — db 구현은 모른다)
     @ExceptionHandler(PessimisticLockingFailureException.class)
-    public ResponseEntity<ProblemDetail> handleLockTimeout(final PessimisticLockingFailureException e, final HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Void>> handleLockTimeout(final PessimisticLockingFailureException e, final HttpServletRequest request) {
         log.warn("락 대기 초과: path={}", request.getRequestURI());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .header(HttpHeaders.RETRY_AFTER, "1")
-                .body(ProblemDetailFactory.of(ApiErrorCode.LOCK_TIMEOUT, request.getRequestURI()));
+                .body(ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, null));
     }
 
     @ExceptionHandler(Exception.class)
-    public ProblemDetail handleUnexpected(final Exception e, final HttpServletRequest request) {
-        log.error("처리되지 않은 예외: path={}", request.getRequestURI(), e);   // 스택은 로그에만, 응답은 고정 문구
-        return ProblemDetailFactory.of(ApiErrorCode.INTERNAL_ERROR, request.getRequestURI());
+    public ResponseEntity<ApiResponse<Void>> handleUnexpected(final Exception e, final HttpServletRequest request) {
+        log.error("처리되지 않은 예외: path={}", request.getRequestURI(), e);   // 스택은 로그에만, 응답은 상태 문구
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.error(HttpStatus.INTERNAL_SERVER_ERROR, null));
     }
 
-    // 표준 예외 응답에 code·문구를 일괄 주입 (405 Allow 등 상위 클래스 헤더는 유지)
+    // 표준 예외 응답 본문을 공통 응답으로 바꾼다 (405 Allow 등 상위 클래스 헤더는 유지).
+    // 검증 실패(MethodArgumentNotValidException, HandlerMethodValidationException)면 data에 [{field, reason}]를 담는다
     @Override
     protected ResponseEntity<Object> handleExceptionInternal(final Exception e, final Object body, final HttpHeaders headers,
                                                              final HttpStatusCode status, final WebRequest request) {
-        final ApiErrorCode code = ApiErrorCode.from(status);
-        return super.handleExceptionInternal(e, ProblemDetailFactory.of(status, code.name(), code.getMessage(), pathOf(request)),
+        return super.handleExceptionInternal(e, ApiResponse.error(HttpStatus.valueOf(status.value()), invalidFieldsOrNull(e)),
                 headers, status, request);
     }
-
-    // handleMethodArgumentNotValid 오버라이드: INVALID_REQUEST + errors[{field, reason, rejectedValue}]
 }
 ```
-- `ProblemDetailFactory.of(...)`: 응답 공통 필드(`code`, `instance`, `timestamp`)를 채우는 유일한 곳. `title`은 두지 않는다 → HTTP 상태 문구(RFC 9457).
-- 문구는 enum(`ErrorCode`, `ApiErrorCode`)에만 둔다. 핸들러에 문구 문자열을 쓰지 않는다.
+- 도메인 에러 문구는 `ErrorCode`에만 둔다. 도메인 밖 에러는 enum을 두지 않고 HTTP 상태 이름과 문구를 쓴다. 핸들러에 문구 문자열을 쓰지 않는다.
+- 클라이언트가 보낸 값(`rejectedValue`)은 검증 실패 응답에 되돌려 주지 않는다.
 - `DataIntegrityViolationException`은 매핑하지 않는다 → 500 (도메인 검증을 거친 뒤 제약 위반이면 버그).
