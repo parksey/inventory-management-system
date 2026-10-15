@@ -52,12 +52,12 @@ class InventoryRepositoryAdapter implements InventoryRepository {
 package com.logistics.inventory.db.config;
 
 @Configuration
-@EntityScan("com.logistics.inventory.domain")          // 엔티티는 domain 모듈에 있다
+@EntityScan("com.logistics.inventory.domain")
 @EnableJpaRepositories("com.logistics.inventory.db")
 class JpaConfig {}
 ```
 - Spring Data 인터페이스와 Adapter는 package-private — db 밖에서는 도메인 인터페이스로만 접근된다.
-- 락 대기 시간 상한을 둬서 경합 시 무한 대기하지 않게 한다. PostgreSQL에는 `FOR UPDATE WAIT n` 문법이 없어 Hibernate가 `lock.timeout` 힌트를 무시할 수 있다 → 적용 여부를 테스트로 확인하고, 안 되면 `SET LOCAL lock_timeout` 또는 커넥션 옵션(`options=-c lock_timeout=3000`)으로 건다 (DECISIONS B11 확정 후 이 템플릿 갱신).
+- 락 대기 시간 상한을 둬서 경합 시 무한 대기하지 않게 한다. PostgreSQL에는 `FOR UPDATE WAIT n` 문법이 없어 Hibernate가 `lock.timeout` 힌트를 무시할 수 있다 → 적용 여부를 테스트로 확인하고, 안 되면 `SET LOCAL lock_timeout` 또는 커넥션 옵션(`options=-c lock_timeout=3000`)으로 건다.
 
 ---
 
@@ -127,7 +127,7 @@ public class InventoryApplication {
 
 ## 3. api — 예외 핸들러
 
-세부(표준 예외별 매핑, 응답 필드, 로그 정책)는 `.pm-plans/tasks/05-error-response.md`. 여기서는 모양만.
+여기서는 모양만 둔다. 세부 매핑은 에러 응답 이슈의 명세서에서 정한다.
 
 ```java
 package com.logistics.inventory.api.common;

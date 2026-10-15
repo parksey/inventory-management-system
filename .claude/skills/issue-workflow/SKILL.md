@@ -100,7 +100,8 @@ $S {N}                                                     # 마지막 PR만: �
 ### 3-4. PR 작성 — 어떻게 개발했는지
 ```bash
 git push -u origin HEAD
-gh pr create --title "{type}({scope}): {제목} (#{N})" --body-file "$(git rev-parse --git-dir)/pr-{N}.md"
+gh pr create --title "{type}({scope}): {제목} (#{N})" --body-file "$(git rev-parse --git-dir)/pr-{N}.md" \
+  --label "$(gh issue view {N} --json labels --jq '[.labels[].name] | join(",")')" --assignee @me
 ```
 `.github/pull_request_template.md`의 모든 섹션을 채운다. 특히:
 - 중간 PR은 `Refs #{N}`, 마지막 PR은 `Closes #{N}`
