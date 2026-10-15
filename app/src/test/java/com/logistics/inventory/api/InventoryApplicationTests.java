@@ -22,10 +22,10 @@ class InventoryApplicationTests {
     private int port;
 
     @Test
-    @DisplayName("TC-1-01 앱이 기동하고 /actuator/health가 HTTP 200과 UP을 돌려준다")
+    @DisplayName("TC-1-01 앱이 기동하고 /api/actuator/health가 HTTP 200과 UP을 돌려준다")
     void health_UP() {
         final ResponseEntity<String> response = RestClient.create("http://localhost:" + port)
-                .get().uri("/actuator/health")
+                .get().uri("/api/actuator/health")
                 .retrieve()
                 .toEntity(String.class);
 
