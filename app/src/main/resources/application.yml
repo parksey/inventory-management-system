@@ -7,6 +7,9 @@ spring:
     import: classpath:inventory-db.yml
   jpa:
     open-in-view: false
+  jackson:
+    deserialization:
+      accept-float-as-int: false   # 기본은 1.5를 정수 필드에 1로 잘라 넣는다. 수량이 조용히 바뀌지 않게 400으로 막는다
   lifecycle:
     timeout-per-shutdown-phase: 20s
 
