@@ -12,6 +12,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
@@ -47,9 +48,10 @@ class InventoryQueryApiTest {
         final ResponseEntity<String> response = get("/api/v1/inventory/TS-BASIC-BLK-M");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(JsonPath.<String>read(response.getBody(), "$.productCode")).isEqualTo("TS-BASIC-BLK-M");
-        assertThat(JsonPath.<String>read(response.getBody(), "$.name")).isEqualTo("베이직 반팔 티셔츠 검정 M");
-        assertThat(JsonPath.<Integer>read(response.getBody(), "$.quantity")).isEqualTo(5);
+        assertThat(JsonPath.<String>read(response.getBody(), "$.code")).isEqualTo("SUCCESS");
+        assertThat(JsonPath.<String>read(response.getBody(), "$.data.productCode")).isEqualTo("TS-BASIC-BLK-M");
+        assertThat(JsonPath.<String>read(response.getBody(), "$.data.name")).isEqualTo("베이직 반팔 티셔츠 검정 M");
+        assertThat(JsonPath.<Integer>read(response.getBody(), "$.data.quantity")).isEqualTo(5);
     }
 
     @Test
@@ -68,6 +70,19 @@ class InventoryQueryApiTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(JsonPath.<String>read(response.getBody(), "$.code")).isEqualTo("INVALID_PRODUCT_CODE");
+    }
+
+    @Test
+    @DisplayName("TC-20-01 없는 상품 조회의 404가 공통 에러 형식으로 나온다")
+    void 없는_상품_공통_형식() {
+        final ResponseEntity<String> response = get("/api/v1/inventory/NOT-EXIST");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
+        assertThat(JsonPath.<Integer>read(response.getBody(), "$.status")).isEqualTo(404);
+        assertThat(JsonPath.<String>read(response.getBody(), "$.code")).isEqualTo("PRODUCT_NOT_FOUND");
+        assertThat(JsonPath.<String>read(response.getBody(), "$.message")).isEqualTo("상품을 찾을 수 없습니다. productCode=NOT-EXIST");
+        assertThat(JsonPath.<Object>read(response.getBody(), "$.data")).isNull();
     }
 
     private ResponseEntity<String> get(final String uri) {
