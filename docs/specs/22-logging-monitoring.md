@@ -12,6 +12,8 @@
 
 ### 설계
 
+![compose 관측 구조](images/22-logging-monitoring.png)
+
 ```
            app ×3   :8080 서비스 / :8081 관리 (health, prometheus)
    로그     stdout(ECS JSON) ──► Alloy ──push──► Loki ┐
