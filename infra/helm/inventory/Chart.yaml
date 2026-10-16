@@ -1,0 +1,8 @@
+apiVersion: v2
+name: inventory
+description: 재고 관리 API (앱 여러 대 + 배포마다 한 번 실행하는 마이그레이션 Job)
+type: application
+# chart 자체의 버전 (템플릿을 바꾸면 올린다)
+version: 0.1.0
+# 배포하는 앱의 버전
+appVersion: "0.1.0"

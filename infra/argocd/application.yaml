@@ -1,0 +1,22 @@
+# ArgoCD에게 "어느 레포의 어느 폴더를 어디에 배포할지" 알려주는 리소스
+# kubectl apply -f infra/argocd/application.yaml 로 한 번만 등록하면 이후로는 git만 바꾸면 된다
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: inventory
+  namespace: argocd             # Application 리소스는 argocd namespace에 만든다
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/parksey/inventory-management-system.git
+    targetRevision: main
+    path: infra/helm/inventory  # 레포 안의 chart 폴더
+  destination:
+    server: https://kubernetes.default.svc   # ArgoCD가 설치된 같은 클러스터
+    namespace: inventory
+  syncPolicy:
+    automated:
+      prune: true               # git에서 지운 리소스는 클러스터에서도 삭제
+      selfHeal: true            # 클러스터를 직접 고치면 git 상태로 되돌림
+    syncOptions:
+      - CreateNamespace=true    # inventory namespace가 없으면 생성
