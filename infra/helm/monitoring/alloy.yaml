@@ -1,0 +1,60 @@
+# grafana/alloy: Pod 로그를 읽어 Loki로 보낸다 (compose의 config.alloy와 같은 역할)
+# 하나만 띄워 k8s API로 로그를 읽는다. 노드가 많아지면 노드마다 하나씩(DaemonSet) 둔다
+controller:
+  type: deployment
+  replicas: 1
+
+alloy:
+  configMap:
+    content: |
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      // app=inventory 라벨이 붙은 Pod만. 라벨은 compose와 같게 service, container, level만 둔다
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app"]
+          regex         = "inventory"
+          action        = "keep"
+        }
+        rule {
+          target_label = "service"
+          replacement  = "app"            // compose의 서비스 이름과 같게 해서 대시보드 쿼리를 그대로 쓴다
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "container"     // replica 하나하나
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods.output
+        forward_to = [loki.process.app.receiver]
+      }
+
+      // 앱 JSON에서 level만 라벨로, 시각은 앱이 찍은 @timestamp
+      loki.process "app" {
+        stage.json {
+          expressions = {
+            level = "log.level",
+            ts    = "\"@timestamp\"",
+          }
+        }
+        stage.labels {
+          values = { level = "" }
+        }
+        stage.timestamp {
+          source = "ts"
+          format = "RFC3339Nano"
+        }
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.monitoring.svc:3100/loki/api/v1/push"
+        }
+      }
