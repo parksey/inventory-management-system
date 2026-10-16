@@ -1,3 +1,5 @@
+name: inventory                   # 폴더 이름(infra) 대신 고정한 프로젝트 이름. 컨테이너, 볼륨 이름에 붙는다
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -16,6 +18,42 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  flyway:
+    build:
+      context: ..
+      dockerfile: support/flyway/Dockerfile
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/inventory
+      FLYWAY_USER: inventory
+      FLYWAY_PASSWORD: inventory
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build:
+      context: ..
+      dockerfile: app/Dockerfile
+    deploy:
+      replicas: 3
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/inventory
+      DB_USERNAME: inventory
+      DB_PASSWORD: inventory
+      SWAGGER_ENABLED: "true"
+    depends_on:
+      flyway:
+        condition: service_completed_successfully   # 마이그레이션이 실패하면 앱을 띄우지 않는다
+
+  nginx:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - app
 
 volumes:
   postgres-data:
