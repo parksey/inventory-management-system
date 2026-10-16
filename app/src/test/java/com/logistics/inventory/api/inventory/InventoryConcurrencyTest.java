@@ -42,6 +42,23 @@ class InventoryConcurrencyTest extends InventoryApiTestSupport {
     }
 
     @Test
+    @DisplayName("TC-16-01 같은 상품에 입고와 출고가 섞여 동시에 와도 재고는 시작 재고 - 출고 합 + 입고 합이고 원장과 같다")
+    void 같은_상품_입출고_동시() throws Exception {
+        jdbcTemplate.update("UPDATE inventory SET quantity = 100");
+
+        // 1 ~ 30번은 출고, 31 ~ 70번은 입고. 스레드가 한 번에 출발해 순서가 섞인다
+        final List<ResponseEntity<String>> responses = concurrently(70, i -> i <= 30
+                ? outbound(PRODUCT_CODE, "worker-" + i, "{\"quantity\": 1}")
+                : inbound(PRODUCT_CODE, "worker-" + i, "{\"quantity\": 1}"));
+
+        assertThat(responses).allSatisfy(response -> assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK));
+        assertThat(quantityOf(PRODUCT_CODE)).isEqualTo(110);   // 100 - 30 + 40
+        assertThat(countTransactions()).isEqualTo(70);
+        assertThat(jdbcTemplate.queryForObject("SELECT sum(quantity) FROM stock_transaction WHERE type = 'INBOUND'", Long.class)).isEqualTo(40);
+        assertThat(jdbcTemplate.queryForObject("SELECT sum(quantity) FROM stock_transaction WHERE type = 'OUTBOUND'", Long.class)).isEqualTo(30);
+    }
+
+    @Test
     @DisplayName("TC-12-14 처음 보는 상품에 동시에 입고해도 상품은 하나만 생긴다")
     void 새_상품_동시_입고() throws Exception {
         final List<ResponseEntity<String>> responses = concurrently(20, i -> inbound(NEW_PRODUCT_CODE, "worker-" + i, "{\"quantity\": 1}"));
