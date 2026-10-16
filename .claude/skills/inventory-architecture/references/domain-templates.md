@@ -279,7 +279,7 @@ public enum ErrorCode {
     INVALID_QUANTITY("수량이 올바르지 않습니다.", ErrorKind.INVALID),
     PRODUCT_NOT_FOUND("상품을 찾을 수 없습니다.", ErrorKind.NOT_FOUND),
     INSUFFICIENT_STOCK("재고가 부족합니다.", ErrorKind.CONFLICT),
-    IDEMPOTENCY_KEY_MISMATCH("같은 멱등성 키로 다른 요청이 들어왔습니다.", ErrorKind.UNPROCESSABLE);
+    IDEMPOTENCY_KEY_REUSED("멱등성 키가 다른 요청에 이미 쓰였습니다.", ErrorKind.UNPROCESSABLE);
 
     private final String message;
     private final ErrorKind kind;
@@ -321,5 +321,5 @@ throw BusinessException.of(INSUFFICIENT_STOCK,
 **컴파일러가 못 막는 것**: 상수 이름 변경(= 외부 계약 변경) → API 테스트가 `$.code`를 **문자열 리터럴**로 검증해서 잡는다. 테스트에서 enum 상수를 참조하면 IDE rename에 같이 바뀌어 잡지 못한다.
 
 - 종류(kind)는 enum이 정한다. 던지는 쪽이 `conflict(...)`처럼 종류를 고르지 않는다 — 같은 code가 호출 경로에 따라 다른 HTTP 상태로 나가면 클라이언트가 code를 믿고 분기할 수 없다.
-- **별도 예외 클래스는 코드에서 잡아 처리해야 할 때만** 만든다 (예: `DuplicateIdempotencyKeyException` — 멱등성 래퍼가 잡아 기존 결과를 재조회. HTTP로 나가지 않으므로 `BusinessException`이 아니다).
+- **별도 예외 클래스는 코드에서 잡아 처리해야 할 때만** 만든다. HTTP로 나가지 않으므로 `BusinessException`이 아니다. 지금은 없다 — 동시 요청의 제약 위반은 `INSERT ... ON CONFLICT DO NOTHING`으로 예외 없이 처리한다(상품 등록, 멱등성 기록).
 - 도메인 단위 테스트는 `.extracting("errorCode").isEqualTo(INSUFFICIENT_STOCK)`로, API 테스트는 `jsonPath("$.code").value("INSUFFICIENT_STOCK")`로 검증한다.
