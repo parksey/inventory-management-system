@@ -3,6 +3,8 @@ package com.logistics.inventory.domain.inventory;
 import static com.logistics.inventory.domain.common.ErrorCode.PRODUCT_NOT_FOUND;
 
 import com.logistics.inventory.domain.common.BusinessException;
+import com.logistics.inventory.domain.common.CursorQuery;
+import com.logistics.inventory.domain.common.CursorResult;
 import com.logistics.inventory.domain.inventory.entity.Inventory;
 import com.logistics.inventory.domain.inventory.entity.StockChange;
 import com.logistics.inventory.domain.inventory.model.InboundCommand;
@@ -32,6 +34,16 @@ public class InventoryService {
         return inventoryStore.findStockByProductCode(productCode).orElseThrow(() ->
             BusinessException.of(PRODUCT_NOT_FOUND, "productCode=" + productCode.value())
         );
+    }
+
+    @Transactional(readOnly = true)
+    public CursorResult<StockTransaction> getHistory(final ProductCode productCode, final CursorQuery cursorQuery) {
+        // 상품 (Product) — 없으면 404. 원장과 조인하면 "상품 없음"과 "이력 없음"을 구분할 수 없어 따로 찾는다
+        final Product product = productStore.findByProductCode(productCode).orElseThrow(() ->
+            BusinessException.of(PRODUCT_NOT_FOUND, "productCode=" + productCode.value())
+        );
+        // 원장 (StockTransaction)
+        return stockTransactionStore.findHistoryBy(product.getId(), cursorQuery);
     }
 
     @Transactional

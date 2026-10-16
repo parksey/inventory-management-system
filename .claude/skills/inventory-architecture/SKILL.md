@@ -104,12 +104,20 @@ app/               com.logistics.inventory.api
 Request DTO ──toCommand()──► Command ──► Service ──► Entity 행위 호출
                                             │
 Response DTO ◄──from(result)── Result ◄─────┘
+            (또는 from(entity) — 아래 조건일 때)
 ```
 
-- **Controller는 엔티티를 받지도, 반환하지도 않는다.** 요청은 `Request.toCommand()`로 Command로 바꾸고, 응답은 `Response.from(result)`로 만든다. 엔티티가 API 응답에 노출되면 테이블 구조가 API 계약이 되고, 지연 로딩 예외와 순환 참조가 생긴다.
+- **엔티티를 응답으로 그대로 직렬화하지 않는다.** 요청은 `Request.toCommand()`로 Command로 바꾸고, 응답은 `Response.from(...)`에서 내보낼 필드를 하나씩 골라 만든다. 엔티티가 그대로 JSON이 되면 테이블 구조가 API 계약이 되어, 컬럼을 추가하거나 이름을 바꾸면 응답도 함께 바뀐다.
+  - 서비스가 엔티티를 돌려주고 `Response.from(entity)`가 필드를 옮기는 것은 허용한다 (`StockHistoryResponse.from(StockTransaction)`). 엔티티 필드를 그대로 한 번 더 옮기기만 하는 Result record는 만들지 않는다.
+  - 단, 지연 로딩 연관이 있는 엔티티는 서비스(트랜잭션 안)에서 Result로 바꿔 내보낸다. `open-in-view: false`라 컨트롤러에서 지연 로딩 필드를 건드리면 예외가 난다.
+  - 여러 테이블을 조인해 필요한 컬럼만 읽는 조회는 Result record로 받는다 (`StockResult`).
 - **상태를 바꾸는 요청(입고, 출고)은 데이터를 돌려주지 않는다** (`ApiResponse<Void>`, 서비스는 `void`). 바뀐 상태가 필요하면 조회 API로 읽는다. 결과를 돌려주면 같은 요청이 다시 왔을 때 첫 결과를 저장했다가 다시 만들어 줘야 한다(멱등성).
 - 컨트롤러는 유스케이스마다 나눈다 (`InboundController`, `OutboundController`, 조회는 `InventoryController`). 경로는 같은 `/v1/inventory` 아래에 두고, 서비스는 흐름과 의존성을 공유하면 하나로 둔다.
 - Command·Result·Request·Response는 모두 **record**.
+- 목록을 나눠 조회하는 API는 커서 방식(무한 스크롤)을 기본으로 하고, `app/common`의 `CursorResponse<T>`(`items`, `size`, `hasNext`, `nextCursor`)로 응답한다. 도메인은 `CursorQuery`로 받고 `CursorResult<T>`로 돌려주며, 컨트롤러가 `CursorResponse.of(result, XxxResponse::from)`으로 항목만 바꾼다. 커서 필드를 API마다 다시 정의하지 않는다.
+  - 이유: 원장처럼 계속 쌓이는 목록은 페이지 번호(`OFFSET`) 방식이면 보는 도중 같은 건이 다시 나오고, 뒤 페이지일수록 앞의 건을 읽고 버리느라 느려진다. 커서는 정렬 키(`id`)의 인덱스에서 바로 그 위치부터 읽는다.
+  - JPA는 `where ... and (:cursor is null or t.id < :cursor) order by t.id desc` 쿼리 하나에 `Limit`으로 `size + 1`건을 읽어 다음이 있는지 판단한다(`COUNT` 없음). PostgreSQL 공용 실행 계획에서는 `OR` 조건이 읽은 뒤 거르는 조건이 되어 깊이 넘길수록 느려질 수 있다. 문제가 되면 첫 조회에 `Long.MAX_VALUE`를 넘겨 `t.id < :cursor` 하나로 바꾼다.
+  - "몇 페이지로 바로 가기"나 전체 건수가 꼭 필요한 화면이 생기면 그때 별도 응답을 만든다.
 - Controller에는 비즈니스 로직이 없다 — 변환과 위임만 한다.
 - 검증은 두 층으로 나눈다:
   - Request DTO: 형식 검증(Bean Validation — `@NotBlank`, `@Positive` 등). 잘못된 입력을 빨리 걸러낸다.
@@ -125,7 +133,7 @@ Response DTO ◄──from(result)── Result ◄─────┘
 - 불변식은 엔티티·VO 안에서 검증한다. 서비스에 `if (inventory.getQuantity() < n) throw ...` 같은 규칙 판단을 두지 않는다 — 물어보지 말고 시켜라(Tell, Don't Ask). 규칙이 서비스에 흩어지면 같은 규칙이 여러 곳에 복제되고 결국 어긋난다.
 - 생성은 **정적 팩토리 메서드**(`Product.register(productCode, name)`)로 하고, 팩토리 안에서 불변식을 검증한다.
 - JPA용 기본 생성자는 `@NoArgsConstructor(access = AccessLevel.PROTECTED)`로만 연다.
-- getter는 외부에서 실제로 필요한 것만 둔다. 클래스 전체 `@Getter`보다 필드 단위가 기본.
+- getter는 클래스에 `@Getter`로 붙인다. 필드마다 붙이지 않는다. setter는 두지 않는다(아래 3.3).
 - 다른 애그리거트는 **객체가 아니라 ID로 참조**한다 (`Inventory`는 `Product`가 아니라 `productId`를 가진다). 애그리거트 경계가 곧 락·트랜잭션의 경계이고, 객체 참조는 원치 않는 지연 로딩과 경계 침범을 부른다.
 
 ### 3.2 값 객체(VO)
@@ -254,7 +262,7 @@ Pod가 여러 개 떠 있으므로 **한 JVM 안에서만 유효한 수단은 �
 ## 작업 완료 전 체크리스트
 - [ ] 새 클래스가 올바른 모듈·도메인 패키지에 있는가 (1장)
 - [ ] build.gradle에 금지된 의존성을 추가하지 않았는가
-- [ ] Controller가 엔티티를 받거나 반환하지 않는가
+- [ ] 엔티티를 응답으로 그대로 직렬화하지 않는가, 지연 로딩 연관이 있는 엔티티를 트랜잭션 밖으로 내보내지 않는가
 - [ ] 상태 변경이 setter가 아닌 의도가 드러나는 엔티티 메서드로 이뤄지는가, 불변식이 엔티티·VO 안에 있는가
 - [ ] 재고 변경이 비관적 락 → 엔티티 메서드 → 같은 트랜잭션 원장 기록 패턴을 따르는가
 - [ ] JVM 락·로컬 캐시·인메모리 상태를 쓰지 않았는가

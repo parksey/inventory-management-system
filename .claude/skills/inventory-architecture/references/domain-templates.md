@@ -49,17 +49,16 @@ package com.logistics.inventory.domain.inventory.entity;
 
 @Entity
 @Table(name = "inventory")
+@Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Inventory extends BaseTimeEntity {
 
     @Id
     @Column(name = "product_id")
-    @Getter
     private Long productId;                 // 다른 애그리거트(Product)는 ID로 참조
 
     @Embedded
     @AttributeOverride(name = "value", column = @Column(name = "quantity", nullable = false))
-    @Getter
     private Quantity quantity;
 
     // 빌더는 클래스 안에서만 쓴다. 밖에서는 정적 팩토리로만 만든다

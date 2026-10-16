@@ -17,11 +17,13 @@ import jakarta.persistence.Table;
 import java.time.OffsetDateTime;
 import lombok.AccessLevel;
 import lombok.Builder;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 // 재고 변동 원장. 쓰고 나면 바꾸지 않는다
 @Entity
 @Table(name = "stock_transaction")
+@Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class StockTransaction {
 
