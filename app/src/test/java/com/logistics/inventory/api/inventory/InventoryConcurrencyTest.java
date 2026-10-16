@@ -22,7 +22,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
-// 여러 요청이나 다른 트랜잭션과 겹칠 때의 입고, 출고: 동시 요청, 등록 경합, 잠금 대기 초과
+// 여러 요청이나 다른 트랜잭션과 겹칠 때의 입고, 출고: 동시 요청, 등록 경합, 잠금 대기 초과, 같은 키 동시 요청
 class InventoryConcurrencyTest extends InventoryApiTestSupport {
 
     @Autowired
@@ -114,6 +114,30 @@ class InventoryConcurrencyTest extends InventoryApiTestSupport {
         assertThat(quantityOf(PRODUCT_CODE)).isZero();
         assertThat(countTransactions()).isEqualTo(10);
         assertThat(jdbcTemplate.queryForObject("SELECT sum(quantity) FROM stock_transaction WHERE type = 'OUTBOUND'", Long.class)).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("TC-15-13 같은 키로 동시에 입고해도 재고와 원장에는 한 번만 반영되고 모든 응답은 200이다")
+    void 같은_키_동시_입고() throws Exception {
+        final String key = newIdempotencyKey();
+
+        final List<ResponseEntity<String>> responses = concurrently(20, i -> inbound(PRODUCT_CODE, "worker-01", key, "{\"quantity\": 1}"));
+
+        assertThat(responses).allSatisfy(response -> assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK));
+        assertThat(quantityOf(PRODUCT_CODE)).isEqualTo(6);
+        assertThat(countTransactions()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("TC-15-14 같은 키로 동시에 출고해도 재고와 원장에는 한 번만 반영되고 모든 응답은 200이다")
+    void 같은_키_동시_출고() throws Exception {
+        final String key = newIdempotencyKey();
+
+        final List<ResponseEntity<String>> responses = concurrently(20, i -> outbound(PRODUCT_CODE, "worker-01", key, "{\"quantity\": 1}"));
+
+        assertThat(responses).allSatisfy(response -> assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK));
+        assertThat(quantityOf(PRODUCT_CODE)).isEqualTo(4);
+        assertThat(countTransactions()).isEqualTo(1);
     }
 
     // 스레드를 모두 준비시킨 뒤 한 번에 출발시켜 요청이 실제로 겹치게 한다. i는 1부터

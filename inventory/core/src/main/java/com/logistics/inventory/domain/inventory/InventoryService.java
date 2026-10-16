@@ -1,10 +1,15 @@
 package com.logistics.inventory.domain.inventory;
 
 import static com.logistics.inventory.domain.common.ErrorCode.PRODUCT_NOT_FOUND;
+import static com.logistics.inventory.domain.inventory.entity.StockChangeType.INBOUND;
+import static com.logistics.inventory.domain.inventory.entity.StockChangeType.OUTBOUND;
 
 import com.logistics.inventory.domain.common.BusinessException;
 import com.logistics.inventory.domain.common.CursorQuery;
 import com.logistics.inventory.domain.common.CursorResult;
+import com.logistics.inventory.domain.idempotency.entity.IdempotencyKey;
+import com.logistics.inventory.domain.idempotency.entity.IdempotencyRecord;
+import com.logistics.inventory.domain.idempotency.port.IdempotencyStore;
 import com.logistics.inventory.domain.inventory.entity.Inventory;
 import com.logistics.inventory.domain.inventory.entity.StockChange;
 import com.logistics.inventory.domain.inventory.model.InboundCommand;
@@ -16,6 +21,7 @@ import com.logistics.inventory.domain.product.entity.ProductCode;
 import com.logistics.inventory.domain.product.port.ProductStore;
 import com.logistics.inventory.domain.transaction.entity.StockTransaction;
 import com.logistics.inventory.domain.transaction.port.StockTransactionStore;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +34,7 @@ public class InventoryService {
     private final ProductStore productStore;
     private final InventoryStore inventoryStore;
     private final StockTransactionStore stockTransactionStore;
+    private final IdempotencyStore idempotencyStore;
 
     @Transactional(readOnly = true)
     public StockResult getStock(final ProductCode productCode) {
@@ -47,7 +54,16 @@ public class InventoryService {
     }
 
     @Transactional
-    public void inbound(final InboundCommand command) {
+    public void inbound(final IdempotencyKey idempotencyKey, final InboundCommand command) {
+        // 멱등성 기록 (IdempotencyRecord) — 이미 성공한 키면 내용만 확인하고 다시 반영하지 않는다
+        final IdempotencyRecord request = IdempotencyRecord.of(
+            idempotencyKey, INBOUND, command.productCode(), command.quantity(), command.requesterId()
+        );
+        final Optional<IdempotencyRecord> processed = idempotencyStore.saveOrGetProcessed(request);
+        if (processed.isPresent()) {
+            processed.get().verifySameRequest(request);
+            return;
+        }
         // 상품 (Product) — 없으면 수량 0인 재고와 함께 등록
         final Product product = productRegistrar.getOrRegister(command.productCode());
         // 재고 (Inventory) — 행 잠금 후 증가
@@ -58,7 +74,16 @@ public class InventoryService {
     }
 
     @Transactional
-    public void outbound(final OutboundCommand command) {
+    public void outbound(final IdempotencyKey idempotencyKey, final OutboundCommand command) {
+        // 멱등성 기록 (IdempotencyRecord) — 이미 성공한 키면 내용만 확인하고 다시 반영하지 않는다
+        final IdempotencyRecord request = IdempotencyRecord.of(
+            idempotencyKey, OUTBOUND, command.productCode(), command.quantity(), command.requesterId()
+        );
+        final Optional<IdempotencyRecord> processed = idempotencyStore.saveOrGetProcessed(request);
+        if (processed.isPresent()) {
+            processed.get().verifySameRequest(request);
+            return;
+        }
         // 상품 (Product) — 없으면 404. 출고는 상품을 만들지 않는다
         final Product product = productStore.findByProductCode(command.productCode())
             .orElseThrow(() -> BusinessException.of(PRODUCT_NOT_FOUND, "productCode=" + command.productCode().value()));

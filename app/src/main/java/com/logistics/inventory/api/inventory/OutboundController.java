@@ -2,6 +2,7 @@ package com.logistics.inventory.api.inventory;
 
 import com.logistics.inventory.api.common.ApiHeaders;
 import com.logistics.inventory.api.common.ApiResponse;
+import com.logistics.inventory.domain.idempotency.entity.IdempotencyKey;
 import com.logistics.inventory.domain.inventory.InventoryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -23,9 +24,10 @@ public class OutboundController {
     public ApiResponse<Void> outbound(
             @PathVariable final String productCode,
             @RequestHeader(ApiHeaders.REQUESTER_ID) final String requesterId,   // 형식은 RequesterId가 검증
+            @RequestHeader(ApiHeaders.IDEMPOTENCY_KEY) final String idempotencyKey,   // 형식은 IdempotencyKey가 검증
             @Valid @RequestBody final OutboundRequest request
     ) {
-        inventoryService.outbound(request.toCommand(productCode, requesterId));
+        inventoryService.outbound(new IdempotencyKey(idempotencyKey), request.toCommand(productCode, requesterId));
         return ApiResponse.ok(null);
     }
 }
