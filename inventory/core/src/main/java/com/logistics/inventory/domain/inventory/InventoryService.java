@@ -23,6 +23,7 @@ import com.logistics.inventory.domain.transaction.entity.StockTransaction;
 import com.logistics.inventory.domain.transaction.port.StockTransactionStore;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +36,7 @@ public class InventoryService {
     private final InventoryStore inventoryStore;
     private final StockTransactionStore stockTransactionStore;
     private final IdempotencyStore idempotencyStore;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional(readOnly = true)
     public StockResult getStock(final ProductCode productCode) {
@@ -71,6 +73,8 @@ public class InventoryService {
         final StockChange change = inventory.increase(command.quantity());
         // 원장 (StockTransaction)
         stockTransactionStore.save(StockTransaction.record(change, command.requesterId()));
+        // 커밋된 뒤 지표와 로그가 받는다. 롤백되면 전달되지 않는다
+        eventPublisher.publishEvent(change);
     }
 
     @Transactional
@@ -92,6 +96,8 @@ public class InventoryService {
         final StockChange change = inventory.decrease(command.quantity());
         // 원장 (StockTransaction)
         stockTransactionStore.save(StockTransaction.record(change, command.requesterId()));
+        // 커밋된 뒤 지표와 로그가 받는다. 롤백되면 전달되지 않는다
+        eventPublisher.publishEvent(change);
     }
 
     private Inventory getInventoryForUpdate(final Long productId) {

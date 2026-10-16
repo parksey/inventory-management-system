@@ -2,8 +2,10 @@ package com.logistics.inventory.api.common;
 
 import com.logistics.inventory.domain.common.BusinessException;
 import com.logistics.inventory.domain.common.ErrorCode;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
@@ -20,12 +22,17 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 @Slf4j
 @RestControllerAdvice
+@RequiredArgsConstructor
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+
+    private final MeterRegistry registry;
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(final BusinessException e, final HttpServletRequest request) {
         final ErrorCode errorCode = e.getErrorCode();
         log.warn("비즈니스 예외: code={}, path={}, detail={}", errorCode.name(), request.getRequestURI(), e.getMessage());
+        // 거절 사유별 건수. 상태 코드로만 세면 같은 409로 나가는 다른 에러와 섞인다
+        registry.counter("inventory.business.error", "code", errorCode.name()).increment();
 
         final HttpStatus status = ErrorStatusMapper.toStatus(errorCode.getKind());
         return ResponseEntity.status(status)
