@@ -1,0 +1,70 @@
+// 이 호스트의 컨테이너 로그를 읽어 Loki로 보낸다 (서버마다 하나, k8s면 DaemonSet)
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// 라벨은 값 종류가 적은 것만 둔다. 라벨 조합 하나가 Loki의 저장 단위(스트림) 하나다
+discovery.relabel "containers" {
+  targets = []
+
+  // 이 compose 프로젝트(name: inventory)의 컨테이너만
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "inventory"
+    action        = "keep"
+  }
+
+  // replica를 늘려도 같은 값 (app, postgres, nginx ...)
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  // replica 하나하나 (inventory-app-1 ...)
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.process.app.receiver]
+}
+
+loki.process "app" {
+  // 앱만 ECS JSON이다. postgres, nginx의 평문 로그는 그대로 보낸다
+  stage.match {
+    selector = "{service=\"app\"}"
+
+    stage.json {
+      expressions = {
+        level = "log.level",
+        ts    = "\"@timestamp\"",
+      }
+    }
+
+    // level만 라벨로 올린다. traceId는 요청마다 값이 달라 라벨로 두지 않고 검색으로 찾는다: {service="app"} | json | traceId="..."
+    stage.labels {
+      values = { level = "" }
+    }
+
+    // 수집 시각이 아니라 앱이 찍은 시각을 쓴다
+    stage.timestamp {
+      source = "ts"
+      format = "RFC3339Nano"
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
