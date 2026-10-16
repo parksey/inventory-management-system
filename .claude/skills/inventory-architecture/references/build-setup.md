@@ -166,6 +166,9 @@ server:
     context-path: /api          # 컨트롤러는 /v1/... 만 쓴다. actuator, Swagger도 /api 아래 (헬스 체크 /api/actuator/health)
 ---
 # application-prod.yml
+spring:
+  flyway:
+    enabled: false                # 마이그레이션은 앱보다 먼저 flyway 이미지가 적용한다
 decorator:
   datasource:
     enabled: false                # 운영은 DataSource 래핑 자체를 끈다 (jar는 포함돼 있음)
@@ -185,12 +188,12 @@ decorator:
       enable-logging: false       # 테스트 로그 노이즈 방지. 디버깅할 때만 true
 ```
 
-Helm 차트를 도입할 때(아직 아님) `application-prod.yml`에 `spring.flyway.enabled: false`를 넣고 아래 이미지로 hook Job을 만든다.
+prod는 앱이 마이그레이션하지 않는다. 아래 이미지가 앱보다 먼저 한 번 적용한다 (compose에서는 `flyway` 서비스, Helm에서는 `pre-install/pre-upgrade` hook Job).
 
 ```dockerfile
-# Dockerfile.flyway — Helm pre-install/pre-upgrade Job용 이미지
-FROM flyway/flyway:12             # Boot BOM의 flyway-core 메이저 버전과 맞춘다 (로컬·테스트와 운영의 Flyway가 갈라지지 않게)
+# support/flyway/Dockerfile — 빌드 기준 폴더는 레포 루트 (schema 모듈의 SQL도 복사하므로)
+FROM flyway/flyway:12.4.0         # Boot BOM의 flyway-core 버전과 맞춘다 (로컬·테스트와 운영의 Flyway가 갈라지지 않게)
 COPY support/flyway/src/main/resources/db/migration /flyway/sql
 COPY inventory/schema/src/main/resources/db/migration /flyway/sql   # 도메인마다 schema 모듈의 SQL을 함께 복사
-# Job 커맨드: flyway -url=... -user=... -password=... migrate
+CMD ["migrate"]                   # 접속 정보는 FLYWAY_URL, FLYWAY_USER, FLYWAY_PASSWORD 환경 변수로
 ```

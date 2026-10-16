@@ -65,7 +65,7 @@ description: 재고 관리 시스템 프로젝트의 아키텍처·도메인 설
 **이유**
 - 도메인이 저장소 인터페이스를 소유하고 db가 구현하는 의존성 역전(DIP)이 이 구조의 핵심이다. 엔티티에 JPA 어노테이션을 두는 것은 매핑 메타데이터만 허용한 의도적 타협이고, 도메인이 Spring Data나 DB 구현을 아는 순간 타협이 아니라 붕괴가 된다.
 - 규칙을 문서가 아니라 **빌드가 강제**하게 만든 것이므로, 컴파일이 안 된다고 의존성을 추가해 우회하지 않는다.
-- `schema`, `flyway` 분리: 테이블 SQL은 그 테이블을 쓰는 도메인의 `schema`에 두어 도메인 단위로 함께 옮기고 지울 수 있게 하고, Flyway 실행 설정과 공용 기초 데이터는 `flyway`에 둔다. 여러 jar의 `db/migration`은 Flyway가 classpath에서 한꺼번에 읽으므로 앱, 테스트, (나중의) 마이그레이션 Job이 같은 SQL을 쓴다. **현재는 모든 프로파일에서 앱 기동 시 마이그레이션**한다(Boot 기본값, 여러 Pod가 동시에 떠도 Flyway 락으로 하나만 실행). **Helm 차트를 도입할 때** 운영만 `spring.flyway.enabled=false`로 끄고 `pre-install/pre-upgrade` hook Job으로 옮긴다 — 그때 얻는 것: Pod 기동 지연 제거, 마이그레이션 실패 시 배포 중단(롤링 중 재시작 루프 방지), 앱 계정에서 DDL 권한 제거. 앱은 어느 경우든 `ddl-auto=validate`로 스키마와 엔티티 불일치를 검증한다.
+- `schema`, `flyway` 분리: 테이블 SQL은 그 테이블을 쓰는 도메인의 `schema`에 두어 도메인 단위로 함께 옮기고 지울 수 있게 하고, Flyway 실행 설정과 공용 기초 데이터는 `flyway`에 둔다. 여러 jar의 `db/migration`은 Flyway가 classpath에서 한꺼번에 읽으므로 앱, 테스트, (나중의) 마이그레이션 Job이 같은 SQL을 쓴다. **local과 테스트는 앱 기동 시 마이그레이션**한다(Boot 기본값). **prod는 `spring.flyway.enabled=false`로 끄고, 마이그레이션 이미지(`support/flyway/Dockerfile`)가 앱보다 먼저 한 번 적용**한다 (compose의 `flyway` 서비스, Helm의 `pre-install/pre-upgrade` hook Job) — 얻는 것: Pod 기동 지연 제거, 마이그레이션 실패 시 배포 중단(롤링 중 재시작 루프 방지), 앱 계정에서 DDL 권한 제거. 앱은 어느 경우든 `ddl-auto=validate`로 스키마와 엔티티 불일치를 검증한다.
 - p6spy: 별도 모듈로 두고 app에는 `runtimeOnly`로만 넣어 app 코드가 의존하지 못하게 한다. 포매터 같은 로깅 코드가 app에 섞이지 않고, p6spy를 다른 방식으로 바꿔도 이 모듈 안에서 끝난다. jar는 운영 이미지에도 포함되므로, 운영 프로파일에서는 `decorator.datasource.enabled=false`로 DataSource 래핑 자체를 끄고 로컬·테스트에서만 켠다 (`enable-logging=false`는 로깅만 끄고 프록시 오버헤드는 남는다).
 - 마이그레이션은 **하위 호환**으로 작성한다: pre-upgrade Job이 끝난 뒤에도 롤링 업데이트 동안 구버전 Pod가 새 스키마에서 돈다. 컬럼 삭제·이름 변경은 추가 → 코드 전환 → 삭제로 배포를 나눈다.
 
