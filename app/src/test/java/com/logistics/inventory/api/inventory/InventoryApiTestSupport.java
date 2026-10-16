@@ -1,6 +1,7 @@
 package com.logistics.inventory.api.inventory;
 
 import com.logistics.inventory.api.support.TestcontainersConfig;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -20,7 +21,7 @@ import org.springframework.web.client.RestClient;
 @ActiveProfiles("test")
 @Import(TestcontainersConfig.class)
 @Sql(statements = {
-        "TRUNCATE stock_transaction, inventory, product RESTART IDENTITY",
+        "TRUNCATE idempotency_record, stock_transaction, inventory, product RESTART IDENTITY",
         "INSERT INTO product (product_code, name) VALUES ('TS-BASIC-BLK-M', '베이직 반팔 티셔츠 검정 M')",
         "INSERT INTO inventory (product_id, quantity) SELECT id, 5 FROM product WHERE product_code = 'TS-BASIC-BLK-M'"
 })
@@ -49,18 +50,38 @@ abstract class InventoryApiTestSupport {
         return client;
     }
 
+    // 멱등성 키를 정하지 않으면 요청마다 새 키를 붙인다 (서로 다른 사용자 행동)
     protected ResponseEntity<String> inbound(final String productCode, final String requesterId, final String body) {
-        return post("inbound", productCode, requesterId, body);
+        return inbound(productCode, requesterId, newIdempotencyKey(), body);
+    }
+
+    protected ResponseEntity<String> inbound(final String productCode, final String requesterId, final String idempotencyKey, final String body) {
+        return post("inbound", productCode, requesterId, idempotencyKey, body);
     }
 
     protected ResponseEntity<String> outbound(final String productCode, final String requesterId, final String body) {
-        return post("outbound", productCode, requesterId, body);
+        return outbound(productCode, requesterId, newIdempotencyKey(), body);
     }
 
-    private ResponseEntity<String> post(final String action, final String productCode, final String requesterId, final String body) {
+    protected ResponseEntity<String> outbound(final String productCode, final String requesterId, final String idempotencyKey, final String body) {
+        return post("outbound", productCode, requesterId, idempotencyKey, body);
+    }
+
+    protected static String newIdempotencyKey() {
+        return UUID.randomUUID().toString();
+    }
+
+    private ResponseEntity<String> post(
+            final String action,
+            final String productCode,
+            final String requesterId,
+            final String idempotencyKey,
+            final String body
+    ) {
         return client.post()
                 .uri("/api/v1/inventory/{code}/{action}", productCode, action)
                 .header("X-User-Id", requesterId)
+                .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
                 .retrieve().toEntity(String.class);
@@ -73,6 +94,10 @@ abstract class InventoryApiTestSupport {
 
     protected long countProducts(final String productCode) {
         return jdbcTemplate.queryForObject("SELECT count(*) FROM product WHERE product_code = ?", Long.class, productCode);
+    }
+
+    protected long countIdempotencyRecords() {
+        return jdbcTemplate.queryForObject("SELECT count(*) FROM idempotency_record", Long.class);
     }
 
     protected long countTransactions() {

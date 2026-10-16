@@ -208,10 +208,12 @@ Response DTO ◄──from(result)── Result ◄─────┘
 
 - 유스케이스 서비스는 `domain` 모듈에 둔다 (`@Service`). 서비스는 **흐름을 조율**하고(조회 → 엔티티 행위 호출 → 기록), 규칙 판단은 엔티티에 위임한다.
 - `@Transactional`은 서비스의 public 메서드에만 붙인다. 조회는 `@Transactional(readOnly = true)`. Controller와 db Adapter에는 붙이지 않는다.
-- 원칙은 트랜잭션당 애그리거트 하나다. 예외는 두 가지뿐이고 다른 곳으로 넓히지 않는다:
+- 원칙은 트랜잭션당 애그리거트 하나다. 예외는 세 가지뿐이고 다른 곳으로 넓히지 않는다:
   - 재고 변경과 원장(StockTransaction) 기록은 항상 **같은 트랜잭션** — 재고와 이력이 어긋나면 안 된다.
   - 입고는 여기에 Product 생성까지 묶는다 — 미등록 상품 입고가 한 요청이기 때문이다.
-- DB 제약 위반(예: 멱등성 키 중복)을 잡아 복구해야 하면 **트랜잭션 밖의 별도 빈**에서 잡는다. PostgreSQL은 제약 위반 시 트랜잭션을 중단시키므로 같은 트랜잭션 안에서는 재조회할 수 없고, 같은 클래스 안 호출은 프록시를 거치지 않는다(self-invocation).
+  - 입고, 출고는 멱등성 기록(IdempotencyRecord)도 묶는다 — 실패하면 키도 함께 롤백되어야 같은 키로 다시 왔을 때 처음처럼 처리할 수 있다.
+- 동시 요청에서 제약 위반이 예상되는 저장(상품 등록, 멱등성 기록)은 `INSERT ... ON CONFLICT DO NOTHING`으로 위반 자체를 피하고, 넣은 행 수로 "이 트랜잭션이 넣었나"를 가른다. JPA의 `persist`는 같은 키면 예외로 트랜잭션이 깨지고, `save`(`merge`)는 SELECT 후 INSERT라 동시에 들어온 요청이 둘 다 "없음"을 본다.
+- 그래도 DB 제약 위반을 잡아 복구해야 하는 경우가 생기면 **트랜잭션 밖의 별도 빈**에서 잡는다. PostgreSQL은 제약 위반 시 트랜잭션을 중단시키므로 같은 트랜잭션 안에서는 재조회할 수 없고, 같은 클래스 안 호출은 프록시를 거치지 않는다(self-invocation).
 
 ---
 
@@ -229,8 +231,9 @@ Pod가 여러 개 떠 있으므로 **한 JVM 안에서만 유효한 수단은 �
 - 신규 상품 최초 입고: `db`에서 `INSERT ... ON CONFLICT (product_code) DO NOTHING` 후 다시 조회 — 여러 Pod가 같은 상품 코드를 동시에 입고해도 상품은 한 건이고, 진 요청도 실패하지 않는다. 뒤 요청은 유니크 인덱스에서 앞 요청의 커밋을 기다렸다가 0행으로 넘어가고, READ COMMITTED라 다시 조회하면 앞 요청의 행이 보인다. 조회 후 그냥 `save`하면 진 요청은 유니크 위반으로 트랜잭션이 실패한다(3.5의 함께 만드는 규칙 참고).
 - **READ COMMITTED(PostgreSQL 기본)에 기댄다.** REPEATABLE READ 이상으로 올리면 위 재조회가 앞 요청의 행을 보지 못하거나 직렬화 오류가 나므로 격리 수준을 바꾸지 않는다. Hibernate `FlushMode`도 기본(AUTO)을 유지한다 — `persist`한 엔티티가 다음 조회 전에 INSERT되는 것에 기댄다.
 - **잠금 대기 상한은 커넥션 초기화로 건다**: `spring.datasource.hikari.connection-init-sql: SET lock_timeout = '3s'`. 행 잠금과 유니크 인덱스 대기 모두에 적용되고, 넘기면 `PessimisticLockingFailureException` → 503이다. PostgreSQL에는 `FOR UPDATE`에 대기 시간을 주는 문법이 없어 `jakarta.persistence.lock.timeout` 힌트에 기대지 않는다.
+- **같은 요청 재전송(멱등성 키)**: 입고, 출고 트랜잭션 **맨 앞에서** `idempotency_record`에 키를 `ON CONFLICT DO NOTHING`으로 넣는다(`IdempotencyStore.saveOrGetProcessed`). 이미 성공한 키면 저장된 요청 내용과 비교만 하고(다르면 422) 상품 조회, 재고 잠금까지 가지 않는다. 같은 키가 처리 중이면 유니크 인덱스에서 그 트랜잭션이 끝날 때까지 기다린다. 재고 잠금을 먼저 잡고 키를 확인하면 재전송이 정상 요청의 잠금 줄을 늘리므로 순서를 바꾸지 않는다. 키는 Command가 아니라 서비스의 별도 파라미터로 받는다(요청에 붙은 꼬리표라 업무 데이터가 아니다).
 - 여러 상품을 한 트랜잭션에서 잠글 때는 **productId 오름차순**으로 락을 획득한다 (데드락 방지).
-- DB 제약은 최후 방어선으로 항상 둔다: `CHECK (quantity >= 0)`, `UNIQUE (product_code)`, `UNIQUE (idempotency_key)`. 앱 로직을 믿더라도 제약을 생략하지 않는다.
+- DB 제약은 최후 방어선으로 항상 둔다: `CHECK (quantity >= 0)`, `UNIQUE (product_code)`, `idempotency_record`의 PK(`idempotency_key`). 앱 로직을 믿더라도 제약을 생략하지 않는다.
 - 낙관적 락(`@Version`)은 재고처럼 같은 row에 경합이 몰리는 곳에 쓰지 않는다 (재시도 폭증).
 
 ---
@@ -238,7 +241,7 @@ Pod가 여러 개 떠 있으므로 **한 JVM 안에서만 유효한 수단은 �
 ## 7. 예외와 에러 응답
 
 - 비즈니스 예외는 **`BusinessException` 하나**로 던진다: `throw BusinessException.of(INSUFFICIENT_STOCK, "productId=1, 현재=3, 요청=5")`. 에러마다 하위 클래스를 만들지 않는다 — 에러 하나 추가가 enum 한 줄 + 던지는 곳으로 끝나야 한다.
-- 별도 예외 클래스는 **코드에서 잡아 처리해야 할 때만** 만든다 (`DuplicateIdempotencyKeyException` — 멱등성 래퍼가 잡아 복구).
+- 별도 예외 클래스는 **코드에서 잡아 처리해야 할 때만** 만든다. 지금은 없다 — 멱등성 키 중복도 `ON CONFLICT`로 예외 없이 처리한다(5장).
 - `ErrorCode`(domain)는 enum 하나다. 각 값은 기본 메시지와 **종류**(`ErrorKind`: INVALID / NOT_FOUND / CONFLICT / UNPROCESSABLE)를 가진다. **상수 이름이 곧 응답 code**다(`INSUFFICIENT_STOCK`) — 번호를 따로 두지 않는다. 중복을 사람이 아니라 컴파일러가 막게 하기 위해서다. 이름에는 도메인 명사를 넣는다(`PRODUCT_NOT_FOUND`). 도메인이 늘어 enum을 나눠야 할 때 인터페이스로 뽑는다.
 - **HTTP 상태는 모른다** — 도메인은 웹을 모른다. 종류는 enum이 정하고, 던지는 쪽이 고르지 않는다 (같은 code가 경로마다 다른 상태로 나가면 클라이언트가 분기할 수 없다).
 - 예외 메시지에는 원인을 추적할 식별자와 값을 넣는다. `of(code, detail)`이 기본 문구를 앞에 붙인다 (`"재고가 부족합니다. productId=1, 현재=3, 요청=5"`).

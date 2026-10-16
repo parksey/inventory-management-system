@@ -59,6 +59,7 @@ class InventoryInboundApiTest extends InventoryApiTestSupport {
     void 요청자_없음() {
         final ResponseEntity<String> response = client().post()
                 .uri("/api/v1/inventory/{code}/inbound", PRODUCT_CODE)
+                .header("Idempotency-Key", newIdempotencyKey())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body("{\"quantity\": 3}")
                 .retrieve().toEntity(String.class);
