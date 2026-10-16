@@ -21,7 +21,7 @@ dev  ──●────────●────────●──▶   
 | 배포 브랜치 | `main`. 배포할 때 dev → main으로 PR을 보낸다 |
 | 작업 브랜치 | `{type}/{이슈번호}-{영문-설명}` — 항상 `origin/dev`에서 분기. 한 이슈에서 PR을 여러 개 낼 때는 PR마다 브랜치를 새로 만든다 (`feat/7-outbound-domain`, `feat/7-outbound-api`) |
 | 예시 | `feat/7-outbound-api`, `chore/1-multimodule-setup`, `fix/21-lock-timeout` |
-| dev, main 직접 push | 하지 않는다 |
+| dev, main 직접 push | 하지 않는다. 예외: main에 push되면 CI가 배포할 이미지 태그(`infra/helm/inventory/values.yaml`)를 바꾸는 커밋을 main에 직접 push한다 |
 
 이슈 번호만 쓰고 `#`을 붙이지 않는 이유: 셸에서 `#`이 주석으로 해석돼 매번 따옴표가 필요해진다.
 
