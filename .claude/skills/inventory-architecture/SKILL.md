@@ -47,7 +47,7 @@ description: 재고 관리 시스템 프로젝트의 아키텍처·도메인 설
 
 | 모듈 | 담는 것 | 허용 의존성 |
 |---|---|---|
-| `app` | **유일한 실행 모듈(bootJar)**. 모든 도메인을 조립하는 곳. `@SpringBootApplication`, Controller, 요청/응답 DTO, `GlobalExceptionHandler`, 웹 설정, `application.yml` | `implementation(project(":inventory:core"))`, `runtimeOnly(project(":inventory:db"))`, `runtimeOnly(project(":inventory:schema"))`, `runtimeOnly(project(":support:flyway"))`, `runtimeOnly(project(":support:p6spy"))`, spring-boot-starter-webmvc, validation, actuator, spring-tx(`org.springframework.dao` 예외 매핑용) |
+| `app` | **유일한 실행 모듈(bootJar)**. 모든 도메인을 조립하는 곳. `@SpringBootApplication`, Controller, 요청/응답 DTO, `GlobalExceptionHandler`, 웹 설정, `application.yml` | `implementation(project(":inventory:core"))`, `runtimeOnly(project(":inventory:db"))`, `runtimeOnly(project(":inventory:schema"))`, `runtimeOnly(project(":support:flyway"))`, `runtimeOnly(project(":support:p6spy"))`, spring-boot-starter-webmvc, validation, actuator, spring-tx(`org.springframework.dao` 예외 매핑용), `runtimeOnly` micrometer-registry-prometheus |
 | `domain` | 엔티티(JPA 어노테이션 포함), VO, Store(저장 포트) **인터페이스**, 도메인/애플리케이션 서비스, Command·Result, 도메인 예외·ErrorCode | `compileOnly` jakarta.persistence-api, spring-context, spring-tx (Hibernate 어노테이션이 필요하면 `compileOnly` hibernate-core) |
 | `db` | Spring Data JPA Repository, domain Store 인터페이스의 구현체(Adapter), native query, JPA·DataSource 설정, `inventory-db.yml`(DataSource와 JPA 설정, 실행 단위별 값은 환경변수로) | `compileOnly(project(":inventory:core"))`(실행 시점 domain은 app이 넣는다), spring-boot-starter-data-jpa, postgresql, `testRuntimeOnly(project(":support:flyway"))`, `testRuntimeOnly(project(":inventory:schema"))` |
 | `schema` | **이 도메인 테이블의 단일 원천**. `db/migration/V*__*.sql`만. main에 Java 코드 없음 (테스트는 Testcontainers PostgreSQL에 마이그레이션을 적용해 제약을 SQL로 검증) | main 의존성 없음. 테스트만 `support:flyway`, testcontainers-postgresql |
@@ -252,7 +252,19 @@ Pod가 여러 개 떠 있으므로 **한 JVM 안에서만 유효한 수단은 �
 
 ---
 
-## 8. 테스트
+## 8. 로그와 지표
+
+- **로그**: prod는 Boot 구조화 로깅(`logging.structured.format.console: ecs`)으로 한 줄에 JSON 하나를 쓴다. local, test는 사람이 읽는 패턴이다. traceId는 `TraceIdFilter`가 MDC에 넣고, JSON에는 `traceId` 필드로 들어간다. 어느 replica의 로그인지는 `service.node.name`(호스트명)으로 구분한다.
+- **traceId는 로그 라벨, 지표 태그로 쓰지 않는다.** 요청마다 값이 달라 Loki 스트림, Prometheus 시계열이 요청 수만큼 생긴다. 로그 검색(`| json | traceId="..."`)으로 찾는다.
+- **지표 태그 값은 개수가 정해진 것만**: enum 이름(`type=INBOUND`, `code=INSUFFICIENT_STOCK`)은 되고, 상품 코드, 요청자 ID 같은 요청 값은 안 된다.
+- **도메인은 Micrometer를 모른다.** 서비스는 상태가 바뀐 사실을 Spring 이벤트로 발행하고(`eventPublisher.publishEvent(change)`), app의 리스너가 `@TransactionalEventListener(AFTER_COMMIT)`로 받아 센다(`StockChangeMetrics`). 커밋 뒤에 세야 롤백된 변경이 섞이지 않고, 멱등성 키로 다시 들어와 이벤트 전에 돌아간 요청도 세지 않는다.
+- 거절 건수는 `GlobalExceptionHandler`가 `inventory.business.error{code}`로 센다. 요청 건수, 처리 시간은 Boot가 자동으로 모으는 `http.server.requests`를 쓰고 따로 세지 않는다.
+- actuator는 관리 포트 8081에만 연다(`management.server.port`). 서비스 포트(8080)의 스레드가 꽉 차도 지표 수집과 헬스 확인이 응답한다. 8081은 외부에 노출하지 않는다.
+- 슬로 쿼리: `hibernate.log_slow_query`(기본 1000ms, `SLOW_QUERY_MS`)가 넘은 SQL을 `org.hibernate.SQL_SLOW` 로그로 남긴다. 요청 스레드에서 남으므로 traceId가 붙는다. 락 대기 상한(3s)보다 짧게 둬서 오래 기다린 `FOR UPDATE`도 잡힌다.
+
+---
+
+## 9. 테스트
 
 - domain: Spring 없이 순수 단위 테스트 (엔티티·VO의 불변식과 행위)
 - db: Testcontainers PostgreSQL 기반, 스키마는 `flyway` 모듈 SQL로 생성 (H2 사용 금지 — `FOR UPDATE`, `ON CONFLICT`, CHECK 동작이 달라 동시성 검증이 무의미해진다)
