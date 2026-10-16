@@ -19,14 +19,20 @@ server:
     context-path: /api
 
 management:
+  server:
+    port: 8081
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
         enabled: true
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true   # Prometheus에서 p95, p99를 계산할 수 있게 구간별 건수를 낸다
 
 logging:
   pattern:
