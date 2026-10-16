@@ -47,6 +47,11 @@ services:
       DB_USERNAME: inventory
       DB_PASSWORD: inventory
       SWAGGER_ENABLED: "true"
+    healthcheck:                  # 기동 중인 앱에 요청이 가지 않게 한다 (up --wait, nginx가 기다린다)
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health/readiness"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     depends_on:
       flyway:
         condition: service_completed_successfully   # 마이그레이션이 실패하면 앱을 띄우지 않는다
@@ -58,7 +63,17 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - app
+      app:
+        condition: service_healthy
+
+  k6:                             # 부하 테스트 전용. 평소 up에는 뜨지 않는다 (../load-test/run.sh)
+    image: grafana/k6:1.6.1
+    profiles: [load]
+    volumes:
+      - ../load-test:/scripts:ro
+      - ../build/load-test:/results
+    depends_on:
+      - nginx
 
   # ── 관측 스택: docker compose --profile monitoring up -d ──────────────
   # 로그는 앱이 stdout에 쓰고 Alloy가 읽어 Loki로 민다(push). 메트릭은 Prometheus가 앱의 관리 포트를 긁어 간다(pull)
