@@ -42,6 +42,17 @@ docker compose down -v            # 종료하고 DB 데이터까지 지움
 - Swagger UI: http://localhost:8080/api/swagger-ui.html (API 목록과 헤더 설명, Try it out으로 직접 호출)
 - 앱 컨테이너를 다시 만들면(`up --build` 등) `docker compose restart nginx`로 nginx가 바뀐 앱 주소를 다시 읽게 한다.
 
+**관측 스택 (로그, 메트릭)**
+```bash
+cd infra
+docker compose --profile monitoring up -d --build   # 전체 구성 + Alloy, Loki, Prometheus, Grafana
+```
+- Grafana: http://localhost:3000 (admin / admin). 첫 화면이 `재고 서비스` 대시보드다 (재고 변경 건수와 수량, 거절 사유, API p95, replica별 처리량, DB 커넥션, 슬로 쿼리, 경고와 에러 로그)
+- Prometheus: http://localhost:9090 (`Status > Targets`에 앱 replica가 하나씩 보인다)
+- 로그 검색 (Grafana Explore, Loki): `{service="app"} | json | traceId="<응답 헤더 X-Request-Id 값>"`
+- 쿼리별 누적 시간: `docker compose exec postgres psql -U inventory -c "SELECT calls, round(total_exec_time) AS ms, query FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10"` (빈 볼륨으로 처음 띄울 때 확장이 만들어진다. 이전 볼륨이면 `down -v` 후 다시 띄운다)
+- 앱의 actuator는 관리 포트 8081에만 있고 호스트에 열지 않는다. 컨테이너 안에서 확인: `docker compose exec app wget -qO- localhost:8081/actuator/health/readiness`
+
 **로컬 개발 (IDE에서 앱 실행)**
 ```bash
 cd infra

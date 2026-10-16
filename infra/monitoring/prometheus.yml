@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: inventory
+    metrics_path: /actuator/prometheus
+    # compose 서비스 이름 app을 DNS로 풀면 replica마다 IP가 하나씩 나온다. replica 수를 바꿔도 설정을 고치지 않는다
+    dns_sd_configs:
+      - names: ["app"]
+        type: A
+        port: 8081
+        refresh_interval: 15s
+    # 태그 값이 요청마다 달라지는 실수(예: uri에 상품 코드)가 생기면 이 수를 넘겨 수집이 통째로 실패하고 up=0으로 드러난다
+    sample_limit: 10000
