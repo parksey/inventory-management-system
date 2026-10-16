@@ -39,6 +39,8 @@ docker compose logs nginx         # upstream=<앱 IP>:8080 이 서로 다른 IP 
 
 docker compose down -v            # 종료하고 DB 데이터까지 지움
 ```
+
+**부하 테스트 (k6)** — 레포 루트에서 `./load-test/run.sh [load|stress|spike]`. 빈 DB에서 전체 구성을 띄우고, 상품 하나에 입고와 출고를 몰아 보낸 뒤 재고 정합성을 확인한다 (깨지면 exit 1). 결과는 [부하 테스트 결과](docs/load-test-result.md)
 - Swagger UI: http://localhost:8080/api/swagger-ui.html (API 목록과 헤더 설명, Try it out으로 직접 호출)
 - 앱 컨테이너를 다시 만들면(`up --build` 등) `docker compose restart nginx`로 nginx가 바뀐 앱 주소를 다시 읽게 한다.
 
