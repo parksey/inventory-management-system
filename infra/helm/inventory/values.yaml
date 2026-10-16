@@ -3,18 +3,17 @@
 replicaCount: 3
 
 image:
-  repository: docker.io/<dockerhub-user>/inventory-app
-  # main에 push되면 CI가 커밋 SHA로 이 줄을 바꾼다 → ArgoCD가 변경 감지 → 배포
+  repository: docker.io/parksey/inventory-app
   tag: "initial"
   pullPolicy: IfNotPresent
 
 migration:
   image:
-    repository: docker.io/<dockerhub-user>/inventory-flyway   # 태그는 앱과 같다 (같은 커밋에서 만든 이미지)
+    repository: docker.io/parksey/inventory-flyway
 
 database:
-  url: jdbc:postgresql://postgres:5432/inventory
-  secretName: inventory-db      # username, password가 든 Secret. 설치 전에 kubectl create secret으로 만든다
+  url: jdbc:postgresql://postgres.database.svc.cluster.local:5432/inventory
+  secretName: inventory-db      # username, password가 든 Secret.
   poolSize: 10
 
 resources:
