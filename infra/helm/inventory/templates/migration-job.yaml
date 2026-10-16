@@ -1,12 +1,12 @@
-# helm install, upgrade 때 앱 Pod를 바꾸기 전에 한 번 실행된다 (Pod 수와 무관)
-# 실패하면 upgrade가 실패하고 기존 Pod는 그대로 남는다
 apiVersion: batch/v1
 kind: Job
+
 metadata:
   name: {{ .Release.Name }}-migration
   annotations:
     helm.sh/hook: pre-install,pre-upgrade
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded   # 성공하면 지우고, 실패하면 로그를 보도록 남긴다
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+
 spec:
   backoffLimit: 1
   template:

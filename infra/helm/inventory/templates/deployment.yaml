@@ -1,22 +1,28 @@
 apiVersion: apps/v1
 kind: Deployment
+
 metadata:
   name: {{ .Release.Name }}
   labels:
     app: {{ .Release.Name }}
+
 spec:
   replicas: {{ .Values.replicaCount }}
+
   strategy:
     rollingUpdate:
-      maxUnavailable: 0         # 새 Pod가 준비된 뒤에 기존 Pod를 내린다
+      maxUnavailable: 0
       maxSurge: 1
+
   selector:
     matchLabels:
       app: {{ .Release.Name }}
+
   template:
     metadata:
       labels:
         app: {{ .Release.Name }}
+
     spec:
       containers:
         - name: app
@@ -25,7 +31,7 @@ spec:
           ports:
             - name: http
               containerPort: 8080
-            - name: management  # health, prometheus (Service로는 열지 않는다)
+            - name: management
               containerPort: 8081
           env:
             - name: DB_URL
@@ -42,7 +48,7 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.secretName }}
                   key: password
-          startupProbe:         # 기동하는 동안(최대 60초)은 liveness를 돌리지 않는다
+          startupProbe:
             httpGet:
               path: /actuator/health/liveness
               port: management
