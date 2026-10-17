@@ -1,0 +1,32 @@
+cluster:
+  name: inventory-prod 
+
+destinations:
+  loki:
+    type: loki
+    url: http://loki.monitoring.svc:3100/loki/api/v1/push
+
+podLogsViaLoki:
+  enabled: true
+  labelSelectors:
+    app: inventory
+  staticLabels:
+    service: app
+  extraLogProcessingStages: |
+    stage.json {
+      expressions = {
+        level = "log.level",
+        ts    = "\"@timestamp\"",
+      }
+    }
+    stage.labels {
+      values = { level = "" }
+    }
+    stage.timestamp {
+      source = "ts"
+      format = "RFC3339Nano"
+    }
+
+collectors:
+  alloy-logs:
+    presets: [filesystem-log-reader, daemonset]

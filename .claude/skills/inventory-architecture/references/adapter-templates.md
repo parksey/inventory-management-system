@@ -1,4 +1,4 @@
-# 코드 템플릿 — db·api (어댑터)
+# 코드 템플릿 — db, app (어댑터)
 
 ---
 
@@ -10,40 +10,60 @@ package com.logistics.inventory.db.inventory;
 interface InventoryJpaRepository extends JpaRepository<Inventory, Long> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "3000"))   // ⚠ PG에서 무시될 수 있음 — 아래 참고
     @Query("select i from Inventory i where i.productId = :productId")
     Optional<Inventory> findByProductIdForUpdate(@Param("productId") Long productId);
-
-    @Modifying
-    @Query(value = """
-            INSERT INTO inventory (product_id, quantity, created_at, updated_at)
-            VALUES (:productId, 0, now(), now())
-            ON CONFLICT (product_id) DO NOTHING
-            """, nativeQuery = true)
-    void insertIfAbsent(@Param("productId") Long productId);
 }
 ```
 
 ```java
 @Repository
 @RequiredArgsConstructor
-class InventoryRepositoryAdapter implements InventoryRepository {
+class InventoryStoreAdapter implements InventoryStore {
 
     private final InventoryJpaRepository inventoryJpaRepository;
-
-    @Override
-    public Optional<Inventory> findByProductId(final Long productId) {
-        return inventoryJpaRepository.findById(productId);
-    }
+    private final EntityManager entityManager;
 
     @Override
     public Optional<Inventory> findByProductIdForUpdate(final Long productId) {
         return inventoryJpaRepository.findByProductIdForUpdate(productId);
     }
 
+    // id(productId)를 직접 넣는 엔티티라 JpaRepository.save는 merge로 동작한다 (SELECT가 한 번 더 나가고, 넘긴 객체가 영속 상태가 되지 않는다)
     @Override
-    public void createIfAbsent(final Long productId) {
-        inventoryJpaRepository.insertIfAbsent(productId);
+    public void save(final Inventory inventory) {
+        entityManager.persist(inventory);
+    }
+}
+```
+
+```java
+package com.logistics.inventory.db.product;
+
+interface ProductJpaRepository extends JpaRepository<Product, Long> {
+
+    Optional<Product> findByProductCodeValue(String productCode);
+
+    // 같은 코드가 이미 있으면(다른 트랜잭션이 넣는 중이면 커밋을 기다린 뒤) 오류 없이 넣지 않는다. 넣은 행 수(0 또는 1)를 돌려준다
+    @Modifying
+    @Query(value = """
+            INSERT INTO product (product_code, name)
+            VALUES (:productCode, :name)
+            ON CONFLICT (product_code) DO NOTHING
+            """, nativeQuery = true)
+    int insertIfAbsent(@Param("productCode") String productCode, @Param("name") String name);
+}
+
+@Repository
+@RequiredArgsConstructor
+class ProductStoreAdapter implements ProductStore {
+
+    private static final int INSERTED = 1;   // ON CONFLICT DO NOTHING이 실제로 넣었을 때의 행 수
+
+    private final ProductJpaRepository productJpaRepository;
+
+    @Override
+    public boolean saveIfAbsent(final Product product) {
+        return productJpaRepository.insertIfAbsent(product.getProductCode().value(), product.getName()) == INSERTED;
     }
 }
 ```
@@ -57,62 +77,54 @@ package com.logistics.inventory.db.config;
 class JpaConfig {}
 ```
 - Spring Data 인터페이스와 Adapter는 package-private — db 밖에서는 도메인 인터페이스로만 접근된다.
-- 락 대기 시간 상한을 둬서 경합 시 무한 대기하지 않게 한다. PostgreSQL에는 `FOR UPDATE WAIT n` 문법이 없어 Hibernate가 `lock.timeout` 힌트를 무시할 수 있다 → 적용 여부를 테스트로 확인하고, 안 되면 `SET LOCAL lock_timeout` 또는 커넥션 옵션(`options=-c lock_timeout=3000`)으로 건다.
+- `@Modifying` 쿼리는 `void`, `int`, `long`만 돌려줄 수 있다. 행 수를 도메인 의미(`boolean`)로 바꾸는 일은 어댑터가 한다.
+- 잠금 대기 상한은 `inventory-db.yml`의 커넥션 초기화로 건다: `spring.datasource.hikari.connection-init-sql: SET lock_timeout = '3s'`. PostgreSQL에는 `FOR UPDATE WAIT n` 문법이 없어 `jakarta.persistence.lock.timeout` 힌트에 기대지 않고, 커넥션 설정은 행 잠금과 유니크 인덱스 대기 모두에 적용된다.
 
 ---
 
-## 2. api — Controller, Request/Response
+## 2. app — Controller, Request/Response
 
 ```java
 package com.logistics.inventory.api.inventory;
 
+// 유스케이스마다 컨트롤러를 둔다. 조회는 InventoryController, 출고는 OutboundController
 @RestController
-@RequestMapping("/api/v1/inventory")
+@RequestMapping("/v1/inventory")   // /api는 server.servlet.context-path가 붙인다
 @RequiredArgsConstructor
-public class InventoryController {
+public class InboundController {
 
     private final InventoryService inventoryService;
 
-    @PostMapping("/inbound")
-    public StockChangeResponse inbound(
-            @RequestHeader(value = "Idempotency-Key", required = false) final String idempotencyKey,
+    @PostMapping("/{productCode}/inbound")
+    public ApiResponse<Void> inbound(
+            @PathVariable final String productCode,
+            @RequestHeader(ApiHeaders.REQUESTER_ID) final String requesterId,   // 형식은 RequesterId가 검증
             @Valid @RequestBody final InboundRequest request
     ) {
-        return StockChangeResponse.from(inventoryService.inbound(request.toCommand(idempotencyKey)));
+        inventoryService.inbound(request.toCommand(productCode, requesterId));
+        return ApiResponse.ok(null);   // 상태를 바꾸는 요청은 데이터를 돌려주지 않는다
     }
 }
 ```
 
 ```java
 public record InboundRequest(
-        @NotBlank String sku,
-        @NotBlank String name,
-        @NotNull @Positive Long quantity
+    @NotNull @Positive @Max(1_000_000) Long quantity
 ) {
 
-    public InboundCommand toCommand(final String idempotencyKey) {
+    public InboundCommand toCommand(final String productCode, final String requesterId) {
         return new InboundCommand(
-                new Sku(sku), 
-                name, 
-                new Quantity(quantity), 
-                idempotencyKey
+            new ProductCode(productCode),
+            new Quantity(quantity),
+            new RequesterId(requesterId)
         );
     }
 }
-
-public record StockChangeResponse(
-        Long transactionId,
-        String sku,
-        String name,
-        String type,
-        long quantity,
-        long beforeQuantity,
-        long afterQuantity,
-        OffsetDateTime createdAt
-) {
-    public static StockChangeResponse from(final StockChangeResult result) { ... }
-}
 ```
+- 여러 API가 함께 쓰는 헤더 이름은 `app`의 `ApiHeaders`에 둔다 (`REQUESTER_ID = "X-User-Id"`). 테스트는 계약을 지키려고 헤더 이름을 문자열 리터럴로 쓴다.
+- 조회 응답은 `XxxResponse.from(...)` record로 만든다. 조인해서 읽은 결과는 Result를 받고(`StockResponse.from(StockResult)`), 연관이 없는 엔티티 하나를 읽은 결과는 엔티티를 받아 필드를 골라 옮긴다(`StockHistoryResponse.from(StockTransaction)`).
+- 목록 조회는 `ApiResponse<CursorResponse<XxxResponse>>`를 돌려준다: `ApiResponse.ok(CursorResponse.of(service.getHistory(code, new CursorQuery(cursor, size)), StockHistoryResponse::from))`. 파라미터는 `@RequestParam(required = false) @Min(1) Long cursor`, `@RequestParam(defaultValue = "20") @Min(1) int size`.
+- 어댑터는 `@Query`(`where ... and (:cursor is null or t.id < :cursor) order by t.id desc`) 하나를 `Limit.of(size + 1)`로 부르고, 남는 1건으로 `hasNext`를, 돌려줄 마지막 건의 `id`로 `nextCursor`를 정한다 (`StockTransactionStoreAdapter.findHistoryBy`).
 
 ```java
 @SpringBootApplication(scanBasePackages = "com.logistics.inventory")   // domain, db 빈까지 스캔
@@ -125,7 +137,7 @@ public class InventoryApplication {
 
 ---
 
-## 3. api — 예외 핸들러
+## 3. app — 예외 핸들러
 
 여기서는 모양만 둔다. 세부 매핑은 에러 응답 이슈의 명세서에서 정한다.
 
@@ -146,20 +158,16 @@ final class ErrorStatusMapper {
     }
 }
 
-// 도메인 밖 오류의 code. api 모듈이라 HTTP 상태를 직접 가진다 (ErrorKind로는 405·415·503·500을 표현할 수 없다)
-@Getter
-@RequiredArgsConstructor
-public enum ApiErrorCode {
-    INVALID_REQUEST(HttpStatus.BAD_REQUEST, "요청 값이 올바르지 않습니다."),
-    RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "요청한 경로를 찾을 수 없습니다."),
-    ...
-    LOCK_TIMEOUT(HttpStatus.SERVICE_UNAVAILABLE, "요청이 몰려 재고를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요."),
-    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다.");
+}
+```
 
-    private final HttpStatus status;
-    private final String message;
-
-    static ApiErrorCode from(final HttpStatusCode status) { ... }   // Spring 표준 예외용: 404·405·415·5xx, 나머지 INVALID_REQUEST
+```java
+// 성공과 에러가 같은 모양인 공통 응답. 클라이언트는 code로 분기한다
+public record ApiResponse<T>(int status, String code, String message, T data) {
+    public static <T> ApiResponse<T> ok(final T data) { return new ApiResponse<>(200, "SUCCESS", "success", data); }
+    static <T> ApiResponse<T> error(final HttpStatusCode status, final String code, final String message, final T data) { ... }
+    // 도메인 밖 에러: HTTP 상태 이름이 code, 상태 문구가 message (NOT_FOUND, "Not Found")
+    static <T> ApiResponse<T> error(final HttpStatus status, final T data) { return error(status, status.name(), status.getReasonPhrase(), data); }
 }
 ```
 
@@ -169,39 +177,38 @@ public enum ApiErrorCode {
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {   // 표준 MVC 예외 15여 종은 상위 클래스가 처리
 
     @ExceptionHandler(BusinessException.class)
-    public ProblemDetail handleBusiness(final BusinessException e, final HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Void>> handleBusiness(final BusinessException e, final HttpServletRequest request) {
         final ErrorCode errorCode = e.getErrorCode();
         log.warn("비즈니스 예외: code={}, path={}, detail={}", errorCode.name(), request.getRequestURI(), e.getMessage());
-        return ProblemDetailFactory.of(ErrorStatusMapper.toStatus(errorCode.getKind()), errorCode.name(), e.getMessage(), request.getRequestURI());
+        final HttpStatus status = ErrorStatusMapper.toStatus(errorCode.getKind());
+        return ResponseEntity.status(status).body(ApiResponse.error(status, errorCode.name(), e.getMessage(), null));
     }
 
     // 일시적 경합 → 503 + Retry-After (spring-tx의 org.springframework.dao 예외 — db 구현은 모른다)
     @ExceptionHandler(PessimisticLockingFailureException.class)
-    public ResponseEntity<ProblemDetail> handleLockTimeout(final PessimisticLockingFailureException e, final HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Void>> handleLockTimeout(final PessimisticLockingFailureException e, final HttpServletRequest request) {
         log.warn("락 대기 초과: path={}", request.getRequestURI());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .header(HttpHeaders.RETRY_AFTER, "1")
-                .body(ProblemDetailFactory.of(ApiErrorCode.LOCK_TIMEOUT, request.getRequestURI()));
+                .body(ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, null));
     }
 
     @ExceptionHandler(Exception.class)
-    public ProblemDetail handleUnexpected(final Exception e, final HttpServletRequest request) {
-        log.error("처리되지 않은 예외: path={}", request.getRequestURI(), e);   // 스택은 로그에만, 응답은 고정 문구
-        return ProblemDetailFactory.of(ApiErrorCode.INTERNAL_ERROR, request.getRequestURI());
+    public ResponseEntity<ApiResponse<Void>> handleUnexpected(final Exception e, final HttpServletRequest request) {
+        log.error("처리되지 않은 예외: path={}", request.getRequestURI(), e);   // 스택은 로그에만, 응답은 상태 문구
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.error(HttpStatus.INTERNAL_SERVER_ERROR, null));
     }
 
-    // 표준 예외 응답에 code·문구를 일괄 주입 (405 Allow 등 상위 클래스 헤더는 유지)
+    // 표준 예외 응답 본문을 공통 응답으로 바꾼다 (405 Allow 등 상위 클래스 헤더는 유지).
+    // 검증 실패(MethodArgumentNotValidException, HandlerMethodValidationException)면 data에 [{field, reason}]를 담는다
     @Override
     protected ResponseEntity<Object> handleExceptionInternal(final Exception e, final Object body, final HttpHeaders headers,
                                                              final HttpStatusCode status, final WebRequest request) {
-        final ApiErrorCode code = ApiErrorCode.from(status);
-        return super.handleExceptionInternal(e, ProblemDetailFactory.of(status, code.name(), code.getMessage(), pathOf(request)),
+        return super.handleExceptionInternal(e, ApiResponse.error(HttpStatus.valueOf(status.value()), invalidFieldsOrNull(e)),
                 headers, status, request);
     }
-
-    // handleMethodArgumentNotValid 오버라이드: INVALID_REQUEST + errors[{field, reason, rejectedValue}]
 }
 ```
-- `ProblemDetailFactory.of(...)`: 응답 공통 필드(`code`, `instance`, `timestamp`)를 채우는 유일한 곳. `title`은 두지 않는다 → HTTP 상태 문구(RFC 9457).
-- 문구는 enum(`ErrorCode`, `ApiErrorCode`)에만 둔다. 핸들러에 문구 문자열을 쓰지 않는다.
+- 도메인 에러 문구는 `ErrorCode`에만 둔다. 도메인 밖 에러는 enum을 두지 않고 HTTP 상태 이름과 문구를 쓴다. 핸들러에 문구 문자열을 쓰지 않는다.
+- 클라이언트가 보낸 값(`rejectedValue`)은 검증 실패 응답에 되돌려 주지 않는다.
 - `DataIntegrityViolationException`은 매핑하지 않는다 → 500 (도메인 검증을 거친 뒤 제약 위반이면 버그).

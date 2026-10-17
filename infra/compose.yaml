@@ -1,0 +1,130 @@
+name: inventory
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: inventory-postgres
+    environment:
+      POSTGRES_DB: inventory
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: inventory
+      TZ: UTC
+    ports:
+      - "5432:5432"
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory -d inventory"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  flyway:
+    build:
+      context: ..
+      dockerfile: support/flyway/Dockerfile
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/inventory
+      FLYWAY_USER: inventory
+      FLYWAY_PASSWORD: inventory
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build:
+      context: ..
+      dockerfile: app/Dockerfile
+    deploy:
+      replicas: 3
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/inventory
+      DB_USERNAME: inventory
+      DB_PASSWORD: inventory
+      SWAGGER_ENABLED: "true"
+    healthcheck:                  # 기동 중인 앱에 요청이 가지 않게 한다 (up --wait, nginx가 기다린다)
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health/readiness"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
+
+  nginx:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      app:
+        condition: service_healthy
+
+  k6:                             # 부하 테스트 전용. 평소 up에는 뜨지 않는다 (../load-test/run.sh)
+    image: grafana/k6:1.6.1
+    profiles: [load]
+    volumes:
+      - ../load-test:/scripts:ro
+      - ../build/load-test:/results
+    depends_on:
+      - nginx
+
+  # ── 관측 스택: docker compose --profile monitoring up -d ──────────────
+  # 로그는 앱이 stdout에 쓰고 Alloy가 읽어 Loki로 push. 메트릭은 Prometheus가 앱의 관리 포트를 pull
+
+  loki:
+    profiles: ["monitoring"]
+    image: grafana/loki:3.3.2
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./monitoring/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+
+  alloy:
+    profiles: ["monitoring"]
+    image: grafana/alloy:v1.5.1
+    user: root
+    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data"]
+    volumes:
+      - ./monitoring/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data
+    depends_on:
+      - loki
+
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v3.1.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:11.5.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/inventory.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+
+volumes:
+  postgres-data:
+  loki-data:
+  alloy-data:
+  prometheus-data:

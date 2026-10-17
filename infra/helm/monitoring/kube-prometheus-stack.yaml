@@ -1,0 +1,44 @@
+prometheus:
+  prometheusSpec:
+    scrapeInterval: 15s
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          resources:
+            requests:
+              storage: 5Gi
+
+    additionalScrapeConfigs:
+      - job_name: inventory
+        metrics_path: /actuator/prometheus
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: inventory
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            replacement: $1:8081
+            target_label: __address__
+
+grafana:
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      url: http://loki.monitoring.svc:3100
+
+  dashboardProviders:
+    inventory.yaml:
+      apiVersion: 1
+      providers:
+        - name: inventory
+          type: file
+          options:
+            path: /var/lib/grafana/dashboards/inventory
+  dashboards:
+    inventory: {}   # 설치할 때 --set-file로 compose와 같은 대시보드 JSON을 넣는다
+
+alertmanager:
+  enabled: false # 추후 추가

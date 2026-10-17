@@ -1,0 +1,24 @@
+# 템플릿에 들어갈 기본값. 설치할 때 -f 파일이나 --set 으로 덮어쓴다
+
+replicaCount: 3
+
+image:
+  repository: docker.io/parksey/inventory-app
+  tag: "initial"
+  pullPolicy: IfNotPresent
+
+migration:
+  image:
+    repository: docker.io/parksey/inventory-flyway
+
+database:
+  url: jdbc:postgresql://postgres.database.svc.cluster.local:5432/inventory
+  secretName: inventory-db      # username, password가 든 Secret.
+  poolSize: 10
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 768Mi
+  limits:
+    memory: 1Gi

@@ -1,9 +1,0 @@
-decorator:
-  datasource:
-    enabled: false
-
-springdoc:                        # 운영 기본은 비공개, compose 데모만 SWAGGER_ENABLED=true로 켠다
-  api-docs:
-    enabled: ${SWAGGER_ENABLED:false}
-  swagger-ui:
-    enabled: ${SWAGGER_ENABLED:false}
