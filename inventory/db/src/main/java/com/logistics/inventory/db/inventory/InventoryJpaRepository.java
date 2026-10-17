@@ -15,9 +15,10 @@ interface InventoryJpaRepository extends JpaRepository<Inventory, Long> {
             select new com.logistics.inventory.domain.inventory.model.StockResult(p.productCode.value, p.name.value, i.quantity.value)
             from Product p
             join Inventory i on i.productId = p.id
-            where p.productCode.value = :productCode
+            where p.companyCode.value = :companyCode
+              and p.productCode.value = :productCode
             """)
-    Optional<StockResult> findStockByProductCode(@Param("productCode") String productCode);
+    Optional<StockResult> findStockByProductCode(@Param("companyCode") String companyCode, @Param("productCode") String productCode);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select i from Inventory i where i.productId = :productId")

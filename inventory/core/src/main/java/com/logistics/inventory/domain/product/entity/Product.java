@@ -1,6 +1,7 @@
 package com.logistics.inventory.domain.product.entity;
 
 import com.logistics.inventory.domain.common.BaseTimeEntity;
+import com.logistics.inventory.domain.common.CompanyCode;
 import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
@@ -25,6 +26,10 @@ public class Product extends BaseTimeEntity {
     private Long id;
 
     @Embedded
+    @AttributeOverride(name = "value", column = @Column(name = "company_code", nullable = false, updatable = false))
+    private CompanyCode companyCode;
+
+    @Embedded
     @AttributeOverride(name = "value", column = @Column(name = "product_code", nullable = false))
     private ProductCode productCode;
 
@@ -34,16 +39,19 @@ public class Product extends BaseTimeEntity {
 
     @Builder(access = AccessLevel.PRIVATE)
     private Product(
+        final CompanyCode companyCode,
         final ProductCode productCode,
         final ProductName name
     ) {
+        this.companyCode = companyCode;
         this.productCode = productCode;
         this.name = name;
     }
 
     // 처음 입고되는 상품. 이름은 상품 코드로 시작하고 나중에 바꾼다
-    public static Product register(final ProductCode productCode) {
+    public static Product register(final CompanyCode companyCode, final ProductCode productCode) {
         return Product.builder()
+            .companyCode(companyCode)
             .productCode(productCode)
             .name(new ProductName(productCode.value()))
             .build();

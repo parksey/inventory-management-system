@@ -1,5 +1,6 @@
 package com.logistics.inventory.db.inventory;
 
+import com.logistics.inventory.domain.common.CompanyCode;
 import com.logistics.inventory.domain.inventory.entity.Inventory;
 import com.logistics.inventory.domain.inventory.model.StockResult;
 import com.logistics.inventory.domain.inventory.port.InventoryStore;
@@ -17,8 +18,8 @@ class InventoryStoreAdapter implements InventoryStore {
     private final EntityManager entityManager;
 
     @Override
-    public Optional<StockResult> findStockByProductCode(final ProductCode productCode) {
-        return inventoryJpaRepository.findStockByProductCode(productCode.value());
+    public Optional<StockResult> findStockByProductCode(final CompanyCode companyCode, final ProductCode productCode) {
+        return inventoryJpaRepository.findStockByProductCode(companyCode.value(), productCode.value());
     }
 
     @Override

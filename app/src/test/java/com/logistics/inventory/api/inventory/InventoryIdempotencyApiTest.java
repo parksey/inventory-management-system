@@ -22,6 +22,7 @@ class InventoryIdempotencyApiTest extends InventoryApiTestSupport {
     void 키_없음(final String action) {
         final ResponseEntity<String> response = client().post()
                 .uri("/api/v1/inventory/{code}/{action}", PRODUCT_CODE, action)
+                .header("X-Company-Code", COMPANY_CODE)
                 .header("X-User-Id", "worker-01")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body("{\"quantity\": 3}")

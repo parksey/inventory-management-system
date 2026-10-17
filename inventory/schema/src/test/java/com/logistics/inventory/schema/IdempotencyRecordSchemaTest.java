@@ -1,6 +1,7 @@
 package com.logistics.inventory.schema;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.Connection;
@@ -47,11 +48,25 @@ class IdempotencyRecordSchemaTest {
                 .isInstanceOfSatisfying(SQLException.class, e -> assertThat(e.getSQLState()).isEqualTo(UNIQUE_VIOLATION));
     }
 
+    @Test
+    @DisplayName("TC-40-03 같은 회사의 같은 키는 유니크 제약이 거절하고, 다른 회사의 같은 키는 들어간다")
+    void 회사별_키() throws SQLException {
+        insert("COMPANY-A", "K1");
+
+        assertThatThrownBy(() -> insert("COMPANY-A", "K1"))
+                .isInstanceOfSatisfying(SQLException.class, e -> assertThat(e.getSQLState()).isEqualTo(UNIQUE_VIOLATION));
+        assertThatCode(() -> insert("COMPANY-B", "K1")).doesNotThrowAnyException();
+    }
+
     private static void insert(final String idempotencyKey) throws SQLException {
+        insert("COMPANY-A", idempotencyKey);
+    }
+
+    private static void insert(final String companyCode, final String idempotencyKey) throws SQLException {
         execute("""
-                INSERT INTO idempotency_record (idempotency_key, type, product_code, quantity, requester_id)
-                VALUES ('%s', 'INBOUND', 'TS-BASIC-BLK-M', 3, 'worker-01')
-                """.formatted(idempotencyKey));
+                INSERT INTO idempotency_record (company_code, idempotency_key, type, product_code, quantity, requester_id)
+                VALUES ('%s', '%s', 'INBOUND', 'TS-BASIC-BLK-M', 3, 'worker-01')
+                """.formatted(companyCode, idempotencyKey));
     }
 
     private static void execute(final String sql) throws SQLException {

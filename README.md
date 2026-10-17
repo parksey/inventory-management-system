@@ -30,17 +30,17 @@ docker compose ps -a              # flyway는 Exited (0), app 3개와 nginx는 U
 
 # 입고 (상품이 없으면 입고할 때 함께 만들어진다. 시작할 때 들어 있는 상품은 없다)
 curl -X POST localhost:8080/api/v1/inventory/SKU-001/inbound \
-  -H 'Content-Type: application/json' -H 'X-User-Id: user1' -H "Idempotency-Key: $(uuidgen)" \
+  -H 'Content-Type: application/json' -H 'X-Company-Code: COMPANY-A' -H 'X-User-Id: user1' -H "Idempotency-Key: $(uuidgen)" \
   -d '{"quantity":10}'
 
 # 조회를 여러 번 보내면 nginx가 앱 3대에 번갈아 나눠 보낸다
-for i in $(seq 6); do curl -s localhost:8080/api/v1/inventory/SKU-001; echo; done
+for i in $(seq 6); do curl -s -H 'X-Company-Code: COMPANY-A' localhost:8080/api/v1/inventory/SKU-001; echo; done
 docker compose logs nginx         # upstream=<앱 IP>:8080 이 서로 다른 IP 3개로 번갈아 나오면 분산된 것
 
 docker compose down -v            # 종료하고 DB 데이터까지 지움
 ```
 
-**부하 테스트 (k6)** — 레포 루트에서 `./load-test/run.sh [load|stress|spike]`. 빈 DB에서 전체 구성을 띄우고, 상품 하나에 입고와 출고를 몰아 보낸 뒤 재고 정합성을 확인한다 (깨지면 exit 1). 결과는 [부하 테스트 결과](docs/load-test-result.md)
+**부하 테스트 (k6)** — 레포 루트에서 `./load-test/run.sh [load|stress|spike]`. 빈 DB에서 전체 구성을 띄우고, 두 회사(`COMPANY-A`, `COMPANY-B`)의 같은 상품 코드에 입고와 출고를 몰아 보낸 뒤 재고 정합성을 확인한다 (깨지면 exit 1). 결과는 [부하 테스트 결과](docs/load-test-result.md)
 - Swagger UI: http://localhost:8080/api/swagger-ui.html (API 목록과 헤더 설명, Try it out으로 직접 호출)
 - 앱 컨테이너를 다시 만들면(`up --build` 등) `docker compose restart nginx`로 nginx가 바뀐 앱 주소를 다시 읽게 한다.
 

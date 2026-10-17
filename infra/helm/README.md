@@ -96,9 +96,9 @@ kubectl get pods -n inventory -l app=inventory -w    # 3대 READY 1/1 (Ctrl+C로
 # API (Service로 연결. port-forward는 Pod 하나에만 붙으므로 분산은 확인하지 못한다)
 kubectl port-forward svc/inventory -n inventory 8080:80
 curl -X POST localhost:8080/api/v1/inventory/SKU-001/inbound \
-  -H 'Content-Type: application/json' -H 'X-User-Id: user1' -H "Idempotency-Key: $(uuidgen)" \
+  -H 'Content-Type: application/json' -H 'X-Company-Code: COMPANY-A' -H 'X-User-Id: user1' -H "Idempotency-Key: $(uuidgen)" \
   -d '{"quantity":10}'
-curl localhost:8080/api/v1/inventory/SKU-001
+curl -H 'X-Company-Code: COMPANY-A' localhost:8080/api/v1/inventory/SKU-001
 
 # Grafana (admin / 아래 비밀번호), 대시보드 "재고 서비스"
 kubectl get secret -n monitoring prometheus-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo

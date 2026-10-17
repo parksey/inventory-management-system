@@ -38,7 +38,7 @@ class StockTransactionSchemaTest {
     @BeforeEach
     void clean() throws SQLException {
         execute("TRUNCATE stock_transaction, inventory, product RESTART IDENTITY");
-        execute("INSERT INTO product (product_code, name) VALUES ('TS-BASIC-BLK-M', '베이직 반팔 티셔츠 검정 M')");
+        execute("INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', 'TS-BASIC-BLK-M', '베이직 반팔 티셔츠 검정 M')");
     }
 
     @ParameterizedTest(name = "{0}, 수량 {1}, 전 {2}, 후 {3}")

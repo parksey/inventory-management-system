@@ -24,7 +24,7 @@ import org.springframework.web.client.RestClient;
 @Import(TestcontainersConfig.class)
 @Sql(statements = {
         "TRUNCATE stock_transaction, inventory, product RESTART IDENTITY",
-        "INSERT INTO product (product_code, name) VALUES ('TS-BASIC-BLK-M', '베이직 반팔 티셔츠 검정 M')",
+        "INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', 'TS-BASIC-BLK-M', '베이직 반팔 티셔츠 검정 M')",
         "INSERT INTO inventory (product_id, quantity) SELECT id, 5 FROM product WHERE product_code = 'TS-BASIC-BLK-M'"
 })
 class InventoryQueryApiTest {
@@ -86,6 +86,6 @@ class InventoryQueryApiTest {
     }
 
     private ResponseEntity<String> get(final String uri) {
-        return client.get().uri(uri).retrieve().toEntity(String.class);
+        return client.get().uri(uri).header("X-Company-Code", "COMPANY-A").retrieve().toEntity(String.class);
     }
 }

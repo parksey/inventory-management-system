@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 @Getter
 @RequiredArgsConstructor
 public enum ErrorCode {
+    INVALID_COMPANY_CODE("회사 코드 형식이 올바르지 않습니다.", ErrorKind.INVALID),
     INVALID_PRODUCT_CODE("상품 코드 형식이 올바르지 않습니다.", ErrorKind.INVALID),
     INVALID_QUANTITY("수량이 올바르지 않습니다.", ErrorKind.INVALID),
     INVALID_PRODUCT_NAME("상품명이 올바르지 않습니다.", ErrorKind.INVALID),
