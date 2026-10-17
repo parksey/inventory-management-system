@@ -141,6 +141,7 @@ class InventoryMonitoringTest extends InventoryApiTestSupport {
 
         final ResponseEntity<String> response = client().post()
                 .uri("/api/v1/inventory/{code}/outbound", PRODUCT_CODE)
+                .header("X-Company-Code", COMPANY_CODE)
                 .header("X-User-Id", "user-1")
                 .header("Idempotency-Key", newIdempotencyKey())
                 .header(TRACE_HEADER, "trace-22-10")

@@ -59,6 +59,7 @@ class InventoryInboundApiTest extends InventoryApiTestSupport {
     void 요청자_없음() {
         final ResponseEntity<String> response = client().post()
                 .uri("/api/v1/inventory/{code}/inbound", PRODUCT_CODE)
+                .header("X-Company-Code", COMPANY_CODE)
                 .header("Idempotency-Key", newIdempotencyKey())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body("{\"quantity\": 3}")
@@ -119,7 +120,7 @@ class InventoryInboundApiTest extends InventoryApiTestSupport {
     @Test
     @DisplayName("TC-12-16 상품은 있는데 재고 행이 없으면 500이고 재고 행과 원장을 만들지 않는다")
     void 재고_없는_상품() {
-        jdbcTemplate.update("INSERT INTO product (product_code, name) VALUES ('NO-STOCK-01', '재고 행 없는 상품')");
+        jdbcTemplate.update("INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', 'NO-STOCK-01', '재고 행 없는 상품')");
 
         final ResponseEntity<String> response = inbound("NO-STOCK-01", "worker-01", "{\"quantity\": 3}");
 

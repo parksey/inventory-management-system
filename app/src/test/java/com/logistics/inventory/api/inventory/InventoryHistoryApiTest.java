@@ -18,7 +18,7 @@ class InventoryHistoryApiTest extends InventoryApiTestSupport {
         insertTransaction(PRODUCT_CODE, "INBOUND", 3, 5, 8, "worker-01");
         insertTransaction(PRODUCT_CODE, "OUTBOUND", 2, 8, 6, "worker-02");
         insertTransaction(PRODUCT_CODE, "INBOUND", 4, 6, 10, "worker-01");
-        jdbcTemplate.update("INSERT INTO product (product_code, name) VALUES ('OTHER-01', '다른 상품')");
+        jdbcTemplate.update("INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', 'OTHER-01', '다른 상품')");
         insertTransaction("OTHER-01", "INBOUND", 7, 0, 7, "worker-03");
 
         final ResponseEntity<String> response = history(PRODUCT_CODE, "");
@@ -157,7 +157,10 @@ class InventoryHistoryApiTest extends InventoryApiTestSupport {
     }
 
     private ResponseEntity<String> history(final String productCode, final String query) {
-        return client().get().uri("/api/v1/inventory/" + productCode + "/history" + query).retrieve().toEntity(String.class);
+        return client().get()
+                .uri("/api/v1/inventory/" + productCode + "/history" + query)
+                .header("X-Company-Code", COMPANY_CODE)
+                .retrieve().toEntity(String.class);
     }
 
     private void insertTransaction(

@@ -1,6 +1,7 @@
 package com.logistics.inventory.db.idempotency;
 
 import com.logistics.inventory.domain.idempotency.entity.IdempotencyRecord;
+import com.logistics.inventory.domain.idempotency.entity.IdempotencyRecordId;
 import com.logistics.inventory.domain.idempotency.port.IdempotencyStore;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -16,8 +17,10 @@ class IdempotencyStoreAdapter implements IdempotencyStore {
 
     @Override
     public Optional<IdempotencyRecord> saveOrGetProcessed(final IdempotencyRecord record) {
+        final String companyCode = record.getCompanyCode().value();
         final String idempotencyKey = record.getIdempotencyKey().value();
         final int inserted = idempotencyRecordJpaRepository.insertIfAbsent(
+            companyCode,
             idempotencyKey,
             record.getType().name(),
             record.getProductCode().value(),
@@ -28,7 +31,8 @@ class IdempotencyStoreAdapter implements IdempotencyStore {
         if (inserted == INSERTED) {
             return Optional.empty();
         }
-        return Optional.of(idempotencyRecordJpaRepository.findById(idempotencyKey)
-            .orElseThrow(() -> new IllegalStateException("키 저장이 충돌했는데 기록이 없습니다. idempotencyKey=" + idempotencyKey)));
+        return Optional.of(idempotencyRecordJpaRepository.findById(new IdempotencyRecordId(companyCode, idempotencyKey))
+            .orElseThrow(() -> new IllegalStateException(
+                "키 저장이 충돌했는데 기록이 없습니다. companyCode=" + companyCode + ", idempotencyKey=" + idempotencyKey)));
     }
 }

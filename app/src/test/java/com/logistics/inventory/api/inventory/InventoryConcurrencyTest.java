@@ -97,7 +97,7 @@ class InventoryConcurrencyTest extends InventoryApiTestSupport {
              Statement statement = other.createStatement()) {
             // 다른 Pod가 같은 상품을 등록하는 중: 상품과 재고를 넣고 아직 커밋하지 않았다
             other.setAutoCommit(false);
-            statement.execute("INSERT INTO product (product_code, name) VALUES ('" + NEW_PRODUCT_CODE + "', '" + NEW_PRODUCT_CODE + "')");
+            statement.execute("INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', '" + NEW_PRODUCT_CODE + "', '" + NEW_PRODUCT_CODE + "')");
             statement.execute("INSERT INTO inventory (product_id, quantity) SELECT id, 0 FROM product WHERE product_code = '" + NEW_PRODUCT_CODE + "'");
 
             final Future<ResponseEntity<String>> pending = executor.submit(() -> inbound(NEW_PRODUCT_CODE, "worker-01", "{\"quantity\": 3}"));
@@ -155,6 +155,27 @@ class InventoryConcurrencyTest extends InventoryApiTestSupport {
         assertThat(responses).allSatisfy(response -> assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK));
         assertThat(quantityOf(PRODUCT_CODE)).isEqualTo(4);
         assertThat(countTransactions()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("TC-40-12 두 회사가 같은 상품 코드에 동시에 출고해도 회사마다 재고는 음수가 되지 않고 원장 합계와 같다")
+    void 두_회사_동시_출고() throws Exception {
+        jdbcTemplate.update("UPDATE inventory SET quantity = 10");
+        jdbcTemplate.update("INSERT INTO product (company_code, product_code, name) VALUES (?, ?, ?)", OTHER_COMPANY_CODE, PRODUCT_CODE, PRODUCT_CODE);
+        jdbcTemplate.update("INSERT INTO inventory (product_id, quantity) SELECT id, 10 FROM product WHERE company_code = ?", OTHER_COMPANY_CODE);
+
+        // 홀수는 COMPANY-A, 짝수는 COMPANY-B. 회사마다 15건
+        final List<ResponseEntity<String>> responses = concurrently(30, i -> outbound(
+                i % 2 == 1 ? COMPANY_CODE : OTHER_COMPANY_CODE, PRODUCT_CODE, "worker-" + i, newIdempotencyKey(), "{\"quantity\": 1}"));
+
+        assertThat(responses).filteredOn(response -> response.getStatusCode() == HttpStatus.OK).hasSize(20);
+        assertThat(responses).filteredOn(response -> response.getStatusCode() == HttpStatus.CONFLICT).hasSize(10);
+        for (final String companyCode : List.of(COMPANY_CODE, OTHER_COMPANY_CODE)) {
+            assertThat(quantityOf(companyCode, PRODUCT_CODE)).isZero();
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT sum(t.quantity) FROM stock_transaction t JOIN product p ON p.id = t.product_id
+                    WHERE p.company_code = ? AND t.type = 'OUTBOUND'""", Long.class, companyCode)).isEqualTo(10);
+        }
     }
 
     // 스레드를 모두 준비시킨 뒤 한 번에 출발시켜 요청이 실제로 겹치게 한다. i는 1부터

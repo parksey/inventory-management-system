@@ -1,5 +1,6 @@
 package com.logistics.inventory.domain.inventory.port;
 
+import com.logistics.inventory.domain.common.CompanyCode;
 import com.logistics.inventory.domain.inventory.entity.Inventory;
 import com.logistics.inventory.domain.inventory.model.StockResult;
 import com.logistics.inventory.domain.product.entity.ProductCode;
@@ -7,7 +8,7 @@ import java.util.Optional;
 
 public interface InventoryStore {
 
-    Optional<StockResult> findStockByProductCode(ProductCode productCode);
+    Optional<StockResult> findStockByProductCode(CompanyCode companyCode, ProductCode productCode);
 
     /** 재고 변경용 조회. 커밋까지 다른 트랜잭션의 변경을 막는 행 잠금을 건다. */
     Optional<Inventory> findByProductIdForUpdate(Long productId);

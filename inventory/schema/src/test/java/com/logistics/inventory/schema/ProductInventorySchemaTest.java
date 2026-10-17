@@ -44,16 +44,26 @@ class ProductInventorySchemaTest {
     @Test
     @DisplayName("TC-7-05 같은 상품 코드로 상품을 두 번 넣으면 유니크 제약이 거절한다")
     void 상품_코드_중복() throws SQLException {
-        execute("INSERT INTO product (product_code, name) VALUES ('TS-BASIC-BLK-M', '베이직 반팔 티셔츠 검정 M')");
+        execute("INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', 'TS-BASIC-BLK-M', '베이직 반팔 티셔츠 검정 M')");
 
-        assertRejected("INSERT INTO product (product_code, name) VALUES ('TS-BASIC-BLK-M', '다른 이름')", UNIQUE_VIOLATION);
+        assertRejected("INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', 'TS-BASIC-BLK-M', '다른 이름')", UNIQUE_VIOLATION);
+    }
+
+    @Test
+    @DisplayName("TC-40-02 같은 회사의 같은 상품 코드는 유니크 제약이 거절하고, 다른 회사의 같은 코드는 들어간다")
+    void 회사별_상품_코드() throws SQLException {
+        execute("INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', 'SKU-001', '상품')");
+
+        assertRejected("INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', 'SKU-001', '다른 이름')", UNIQUE_VIOLATION);
+        execute("INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-B', 'SKU-001', '상품')");
+        assertThat(queryLong("SELECT count(*) FROM product WHERE product_code = 'SKU-001'")).isEqualTo(2);
     }
 
     @Test
     @DisplayName("TC-7-06 재고 수량을 음수로 바꾸거나 넣으면 체크 제약이 거절하고 수량은 그대로다")
     void 음수_수량() throws SQLException {
-        execute("INSERT INTO product (product_code, name) VALUES ('TS-BASIC-BLK-M', '베이직 반팔 티셔츠 검정 M')");
-        execute("INSERT INTO product (product_code, name) VALUES ('TS-BASIC-BLK-L', '베이직 반팔 티셔츠 검정 L')");
+        execute("INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', 'TS-BASIC-BLK-M', '베이직 반팔 티셔츠 검정 M')");
+        execute("INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', 'TS-BASIC-BLK-L', '베이직 반팔 티셔츠 검정 L')");
         execute("INSERT INTO inventory (product_id, quantity) SELECT id, 0 FROM product WHERE product_code = 'TS-BASIC-BLK-M'");
 
         assertRejected("UPDATE inventory SET quantity = -1", CHECK_VIOLATION);

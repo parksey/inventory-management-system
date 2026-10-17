@@ -1,4 +1,4 @@
-// 상품 하나에 입고, 출고를 섞어 보내고, 일부는 같은 멱등성 키로 동시에 두 번 보낸다.
+// 두 회사의 같은 상품 코드에 입고, 출고를 섞어 보내고, 일부는 같은 멱등성 키로 동시에 두 번 보낸다.
 // 실행: ./load-test/run.sh [load|stress|spike] (compose 네트워크 안에서 nginx로 보낸다)
 import http from 'k6/http';
 import exec from 'k6/execution';
@@ -7,6 +7,8 @@ import { Counter } from 'k6/metrics';
 const BASE = __ENV.BASE_URL || 'http://nginx/api/v1/inventory';
 const SCENARIO = __ENV.SCENARIO || 'load';
 const PRODUCT = 'LOAD-TEST-01';
+// 상품 코드가 같아도 회사마다 재고가 따로다. VU 번호로 회사를 나눈다
+const COMPANIES = ['COMPANY-A', 'COMPANY-B'];
 const INITIAL_STOCK = 50;
 const DUPLICATE_RATE = 0.2;
 const STATUSES = [200, 409, 500, 502, 503, 504];
@@ -77,7 +79,7 @@ export const options = {
 // 409(재고 부족)는 정상 응답이다
 http.setResponseCallback(http.expectedStatuses(200, 409));
 
-function request(type, quantity, key) {
+function request(company, type, quantity, key) {
     return {
         method: 'POST',
         url: `${BASE}/${PRODUCT}/${type}`,
@@ -85,6 +87,7 @@ function request(type, quantity, key) {
         params: {
             headers: {
                 'Content-Type': 'application/json',
+                'X-Company-Code': company,
                 'X-User-Id': `load-vu-${__VU}`,
                 'Idempotency-Key': key,
             },
@@ -100,11 +103,13 @@ function count(responses) {
 }
 
 export function setup() {
-    const res = http.batch([request('inbound', INITIAL_STOCK, crypto.randomUUID())]);
-    if (res[0].status !== 200) {
-        throw new Error(`시작 재고 입고 실패: ${res[0].status} ${res[0].body}`);
-    }
-    count(res);
+    const res = http.batch(COMPANIES.map((company) => request(company, 'inbound', INITIAL_STOCK, crypto.randomUUID())));
+    res.forEach((r) => {
+        if (r.status !== 200) {
+            throw new Error(`시작 재고 입고 실패: ${r.status} ${r.body}`);
+        }
+    });
+    res.forEach((r) => count([r]));
 }
 
 export default function () {
@@ -113,7 +118,7 @@ export default function () {
     }
     const type = Math.random() < 0.5 ? 'inbound' : 'outbound';
     const quantity = 1 + Math.floor(Math.random() * 5);
-    const req = request(type, quantity, crypto.randomUUID());
+    const req = request(COMPANIES[__VU % COMPANIES.length], type, quantity, crypto.randomUUID());
     // 같은 키를 동시에 두 번: nginx가 번갈아 보내 대개 서로 다른 앱에 들어간다
     count(http.batch(Math.random() < DUPLICATE_RATE ? [req, req] : [req]));
 }

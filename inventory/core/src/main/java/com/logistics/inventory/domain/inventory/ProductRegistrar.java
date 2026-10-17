@@ -1,5 +1,6 @@
 package com.logistics.inventory.domain.inventory;
 
+import com.logistics.inventory.domain.common.CompanyCode;
 import com.logistics.inventory.domain.inventory.entity.Inventory;
 import com.logistics.inventory.domain.inventory.port.InventoryStore;
 import com.logistics.inventory.domain.product.entity.Product;
@@ -16,13 +17,13 @@ public class ProductRegistrar {
     private final ProductStore productStore;
     private final InventoryStore inventoryStore;
 
-    public Product getOrRegister(final ProductCode productCode) {
-        return productStore.findByProductCode(productCode).orElseGet(() -> register(productCode));
+    public Product getOrRegister(final CompanyCode companyCode, final ProductCode productCode) {
+        return productStore.findByProductCode(companyCode, productCode).orElseGet(() -> register(companyCode, productCode));
     }
 
-    private Product register(final ProductCode productCode) {
-        final boolean created = productStore.saveIfAbsent(Product.register(productCode));
-        final Product product = productStore.findByProductCode(productCode).orElseThrow();
+    private Product register(final CompanyCode companyCode, final ProductCode productCode) {
+        final boolean created = productStore.saveIfAbsent(Product.register(companyCode, productCode));
+        final Product product = productStore.findByProductCode(companyCode, productCode).orElseThrow();
         if (created) {
             inventoryStore.save(Inventory.create(product.getId()));
         }

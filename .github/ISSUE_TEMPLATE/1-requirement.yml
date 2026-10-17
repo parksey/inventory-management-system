@@ -33,4 +33,4 @@ body:
   - type: textarea
     id: constraints
     attributes:
-      label: 제약 · 범위 밖
+      label: 제약, 범위 밖
