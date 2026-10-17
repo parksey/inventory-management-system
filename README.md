@@ -55,6 +55,8 @@ docker compose --profile monitoring up -d --build   # 전체 구성 + Alloy, Lok
 - 쿼리별 누적 시간: `docker compose exec postgres psql -U inventory -c "SELECT calls, round(total_exec_time) AS ms, query FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10"` (빈 볼륨으로 처음 띄울 때 확장이 만들어진다. 이전 볼륨이면 `down -v` 후 다시 띄운다)
 - 앱의 actuator는 관리 포트 8081에만 있고 호스트에 열지 않는다. 컨테이너 안에서 확인: `docker compose exec app wget -qO- localhost:8081/actuator/health/readiness`
 
+**k8s**: `infra/README.md` (ArgoCD 배포 흐름, 처음 설정, 롤백), `infra/helm/README.md` (차트 구성, 관측 스택 설치, minikube로 차트만 확인)
+
 **로컬 개발 (IDE에서 앱 실행)**
 ```bash
 cd infra

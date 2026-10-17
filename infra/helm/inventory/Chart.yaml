@@ -1,0 +1,5 @@
+apiVersion: v2
+name: inventory
+description: 재고 관리 API (앱 여러 대 + 배포마다 한 번 실행하는 마이그레이션 Job)
+type: application
+version: 0.1.0

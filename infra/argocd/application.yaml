@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: inventory
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/parksey/inventory-management-system.git
+    targetRevision: main
+    path: infra/helm/inventory
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: inventory
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
