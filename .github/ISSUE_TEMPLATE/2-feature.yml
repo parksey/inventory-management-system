@@ -9,7 +9,7 @@ body:
   - type: textarea
     id: background
     attributes:
-      label: 배경 · 목적
+      label: 배경, 목적
     validations:
       required: true
   - type: textarea

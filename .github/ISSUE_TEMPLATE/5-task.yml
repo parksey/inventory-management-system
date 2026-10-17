@@ -1,5 +1,5 @@
 name: 작업
-description: 빌드 · CI · 배포 · 문서 등 기능 외 작업
+description: 빌드, CI, 배포, 문서 등 기능 외 작업
 title: "chore(<scope>): "
 labels: ["chore"]
 body:
@@ -9,7 +9,7 @@ body:
   - type: textarea
     id: background
     attributes:
-      label: 배경 · 목적
+      label: 배경, 목적
     validations:
       required: true
   - type: textarea

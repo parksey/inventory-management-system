@@ -33,7 +33,7 @@ body:
     id: impact
     attributes:
       label: 영향 범위
-      description: 이 변경으로 함께 영향받는 기능 · API
+      description: 이 변경으로 함께 영향받는 기능, API
   - type: textarea
     id: questions
     attributes:
