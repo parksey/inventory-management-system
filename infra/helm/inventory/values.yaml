@@ -4,7 +4,7 @@ replicaCount: 3
 
 image:
   repository: docker.io/parksey/inventory-app
-  tag: "8c5f75f7193b6ca2331e669ee4f71bcab506266e"
+  tag: "f6226691fe30114add521b79674a07465ba79ce4"
   pullPolicy: IfNotPresent
 
 migration:
