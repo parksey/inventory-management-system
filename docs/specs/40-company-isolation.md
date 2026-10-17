@@ -49,14 +49,13 @@ ALTER TABLE idempotency_record ADD CONSTRAINT pk_idempotency_record PRIMARY KEY 
 - 대안: 두 테이블에도 `company_code`를 넣는 방법. 상품을 거치지 않고 회사별로 재고를 모아 보는 쿼리(예: "A사 전체 재고 목록")가 조인 없이 된다. 하지만 지금 그런 API가 없고, 같은 값을 세 곳에 두면 "상품은 A사인데 재고는 B사" 같은 어긋남을 막는 제약을 따로 둬야 한다. 회사별 목록 API가 생길 때 다시 본다.
 
 **멱등성 기록은 대리키가 아니라 복합 PK로 둔다** (대안: `id BIGINT` PK + `UNIQUE (company_code, idempotency_key)`)
-- 정합성은 같다. 어느 쪽이든 `(company_code, idempotency_key)` 유니크 인덱스 하나가 같은 키끼리 줄을 세우고, `ON CONFLICT (company_code, idempotency_key)`가 그 인덱스로 충돌을 판단한다.
-- 대안이 나은 점: 엔티티가 `Product`와 같은 모양이 된다. 지금은 `@IdClass(IdempotencyRecordId)` 때문에 회사 코드와 키를 `String` 필드로 두고 VO를 돌려주는 getter를 따로 둔다. 대안은 `Long id`에 `@Embedded CompanyCode`, `@Embedded IdempotencyKey`로 끝난다.
-- 복합 PK를 고른 이유
-  - `id`를 읽는 곳이 없다. 조회는 늘 회사 + 키로 한다. `product.id`는 `inventory`, `stock_transaction`이 외래 키로 가리켜서 필요하지만, `idempotency_record`는 아무도 참조하지 않는다. 그런데도 재고가 바뀔 때마다 한 행씩 쌓이는 이 테이블에서 `id` 인덱스를 매번 함께 고쳐야 한다.
-  - 회사별로 파티션을 나눌 때(`PARTITION BY HASH (company_code)`) PostgreSQL은 PK와 유니크에 파티션 키가 들어가야 한다. 복합 PK는 이미 회사 코드를 포함해 그대로 쓰고, 대리키는 PK를 `(company_code, id)`로 바꿔야 해서 `id`만의 PK가 의미를 잃는다.
-  - 큰 고객사를 다른 DB로 떼어낼 때 복합 PK는 회사 코드가 키에 있어 행을 그대로 옮길 수 있다. 대리키의 `id`는 DB마다 따로 증가해서 옮기거나 합칠 때 겹칠 수 있다.
-  - 시간 기준 파티션(`created_at`, #15의 오래된 키 정리 경로)은 두 방식 모두 유니크에 `created_at`이 들어가야 해서 회사 + 키만의 유일성을 DB가 보장하지 못한다. 대리키가 이 문제를 풀어 주지 않는다.
-  - 나중에 멱등성 기록과 원장을 연결해야 하면(응답에 데이터를 담게 될 때) `idempotency_record`에 `stock_transaction_id`를 두는 방향이라 대리키가 필요하지 않다.
+- 두 방식 모두 같은 키인지는 `(company_code, idempotency_key)` 유니크 인덱스 하나로 판단한다. 정합성 차이는 없다.
+- 대리키가 나은 점: 엔티티를 `Product`처럼 `Long id`와 `@Embedded` VO로 매핑할 수 있다. 지금은 `@IdClass` 때문에 회사 코드와 키를 `String` 필드로 두고, VO를 돌려주는 getter를 따로 만든다.
+- 그래도 복합 PK를 고른 이유
+  - 쓰지 않는 인덱스가 하나 더 생긴다. 대리키를 두면 `id` PK 인덱스와 회사 + 키 유니크 인덱스, 두 개가 된다. 조회는 항상 회사 + 키로 하고 이 테이블을 외래 키로 가리키는 곳도 없어서 `id` 인덱스를 읽는 쿼리가 없다. 그런데 입고나 출고 한 건마다 행이 하나 들어가므로 그때마다 `id` 인덱스에도 항목이 추가된다.
+  - 회사별로 파티션을 나눌 때 PK를 바꾸지 않아도 된다. PostgreSQL은 파티션 테이블의 PK에 파티션 키가 들어가야 한다. `PARTITION BY HASH (company_code)`로 나누면 복합 PK는 이미 `company_code`를 포함해 그대로 쓴다. 대리키는 PK를 `(company_code, id)`로 바꿔야 해서, `id`만으로 행을 구분한다는 대리키의 이점이 사라진다.
+- 시간 기준 파티션(`created_at`, #15의 오래된 키 정리 경로)은 두 방식 모두 유니크에 `created_at`이 들어가야 해서 회사 + 키만의 유일성을 DB가 보장하지 못한다. 어느 쪽을 골라도 그때 함께 풀어야 한다.
+- 나중에 멱등성 기록과 원장을 연결해야 하면(응답에 데이터를 담게 될 때) `idempotency_record`에 `stock_transaction_id`를 두면 되므로 대리키가 필요하지 않다.
 
 **회사 테이블을 두지 않는다**
 - 이슈가 회사 등록, 관리를 범위 밖으로 두었다. 회사 테이블을 만들어도 채울 길이 없고, 외래 키를 걸면 등록되지 않은 회사의 요청이 모두 실패해서 "형식이 맞으면 받는다"와 어긋난다.
@@ -192,3 +191,4 @@ public void outbound(final IdempotencyKey idempotencyKey, final OutboundCommand 
 
 ### 변경 이력
 - 멱등성 기록을 대리키가 아니라 복합 PK로 두는 이유를 추가 (구현 리뷰)
+- 복합 PK 이유에서 회사별 DB 분리 근거를 지움. 빈 DB로 떼어낼 때는 대리키도 id가 겹치지 않아 근거가 성립하지 않는다 (PR 리뷰)
