@@ -30,6 +30,7 @@ class InventoryIdempotencyApiTest extends InventoryApiTestSupport {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(JsonPath.<String>read(response.getBody(), "$.code")).isEqualTo("BAD_REQUEST");
+        assertThat(JsonPath.<String>read(response.getBody(), "$.data[0].field")).isEqualTo("Idempotency-Key");   // 빠진 헤더 이름을 알려 준다
         assertThat(quantityOf(PRODUCT_CODE)).isEqualTo(5);
         assertThat(countTransactions()).isZero();
     }
