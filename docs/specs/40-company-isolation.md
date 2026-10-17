@@ -48,6 +48,16 @@ ALTER TABLE idempotency_record ADD CONSTRAINT pk_idempotency_record PRIMARY KEY 
 - 재고와 이력을 읽는 길은 모두 "회사 코드 + 상품 코드 → 상품 → `product_id`"를 거친다. 상품을 찾을 때 회사가 걸러지므로 그 뒤의 재고와 이력도 자기 회사의 것만 나온다.
 - 대안: 두 테이블에도 `company_code`를 넣는 방법. 상품을 거치지 않고 회사별로 재고를 모아 보는 쿼리(예: "A사 전체 재고 목록")가 조인 없이 된다. 하지만 지금 그런 API가 없고, 같은 값을 세 곳에 두면 "상품은 A사인데 재고는 B사" 같은 어긋남을 막는 제약을 따로 둬야 한다. 회사별 목록 API가 생길 때 다시 본다.
 
+**멱등성 기록은 대리키가 아니라 복합 PK로 둔다** (대안: `id BIGINT` PK + `UNIQUE (company_code, idempotency_key)`)
+- 정합성은 같다. 어느 쪽이든 `(company_code, idempotency_key)` 유니크 인덱스 하나가 같은 키끼리 줄을 세우고, `ON CONFLICT (company_code, idempotency_key)`가 그 인덱스로 충돌을 판단한다.
+- 대안이 나은 점: 엔티티가 `Product`와 같은 모양이 된다. 지금은 `@IdClass(IdempotencyRecordId)` 때문에 회사 코드와 키를 `String` 필드로 두고 VO를 돌려주는 getter를 따로 둔다. 대안은 `Long id`에 `@Embedded CompanyCode`, `@Embedded IdempotencyKey`로 끝난다.
+- 복합 PK를 고른 이유
+  - `id`를 읽는 곳이 없다. 조회는 늘 회사 + 키로 한다. `product.id`는 `inventory`, `stock_transaction`이 외래 키로 가리켜서 필요하지만, `idempotency_record`는 아무도 참조하지 않는다. 그런데도 재고가 바뀔 때마다 한 행씩 쌓이는 이 테이블에서 `id` 인덱스를 매번 함께 고쳐야 한다.
+  - 회사별로 파티션을 나눌 때(`PARTITION BY HASH (company_code)`) PostgreSQL은 PK와 유니크에 파티션 키가 들어가야 한다. 복합 PK는 이미 회사 코드를 포함해 그대로 쓰고, 대리키는 PK를 `(company_code, id)`로 바꿔야 해서 `id`만의 PK가 의미를 잃는다.
+  - 큰 고객사를 다른 DB로 떼어낼 때 복합 PK는 회사 코드가 키에 있어 행을 그대로 옮길 수 있다. 대리키의 `id`는 DB마다 따로 증가해서 옮기거나 합칠 때 겹칠 수 있다.
+  - 시간 기준 파티션(`created_at`, #15의 오래된 키 정리 경로)은 두 방식 모두 유니크에 `created_at`이 들어가야 해서 회사 + 키만의 유일성을 DB가 보장하지 못한다. 대리키가 이 문제를 풀어 주지 않는다.
+  - 나중에 멱등성 기록과 원장을 연결해야 하면(응답에 데이터를 담게 될 때) `idempotency_record`에 `stock_transaction_id`를 두는 방향이라 대리키가 필요하지 않다.
+
 **회사 테이블을 두지 않는다**
 - 이슈가 회사 등록, 관리를 범위 밖으로 두었다. 회사 테이블을 만들어도 채울 길이 없고, 외래 키를 걸면 등록되지 않은 회사의 요청이 모두 실패해서 "형식이 맞으면 받는다"와 어긋난다.
 - 그래서 `company_code` 문자열을 그대로 둔다. 실제 서비스라면 회사 테이블과 외래 키를 추가하고, 앱은 등록된 회사인지 확인한다.
@@ -181,3 +191,4 @@ public void outbound(final IdempotencyKey idempotencyKey, final OutboundCommand 
 - 없음 (회사 코드는 `X-Company-Code` 헤더로 받고, 제약은 마이그레이션 하나로 한 번에 바꾸기로 결정했다)
 
 ### 변경 이력
+- 멱등성 기록을 대리키가 아니라 복합 PK로 두는 이유를 추가 (구현 리뷰)
