@@ -93,7 +93,7 @@ public class InventoryService {
             processed.get().verifySameRequest(request);
             return;
         }
-        // 상품 (Product) — 없으면 404. 출고는 상품을 만들지 않는다
+        // 상품 (Product) — 내 회사의 상품만 찾는다. 다른 회사 상품은 없는 것과 같은 404. 출고는 상품을 만들지 않는다
         final Product product = productStore.findByProductCode(command.companyCode(), command.productCode())
             .orElseThrow(() -> BusinessException.of(PRODUCT_NOT_FOUND, "productCode=" + command.productCode().value()));
         // 재고 (Inventory) — 행 잠금 후 감소. 재고 부족은 엔티티가 판단한다

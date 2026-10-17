@@ -101,6 +101,7 @@ public class IdempotencyRecord {
         return new IdempotencyKey(idempotencyKey);
     }
 
+    // 회사 코드는 키의 일부라 비교하지 않는다. 저장된 기록을 찾았다면 이미 같다
     public void verifySameRequest(final IdempotencyRecord request) {
         final List<String> differences = new ArrayList<>();
         if (type != request.type) {
