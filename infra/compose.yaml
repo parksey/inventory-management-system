@@ -1,4 +1,4 @@
-name: inventory                   # 폴더 이름(infra) 대신 고정한 프로젝트 이름. 컨테이너, 볼륨 이름에 붙는다
+name: inventory
 
 services:
   postgres:
@@ -17,7 +17,7 @@ services:
       - shared_preload_libraries=pg_stat_statements
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro   # 빈 볼륨으로 처음 뜰 때만 실행된다
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U inventory -d inventory"]
       interval: 5s
@@ -49,7 +49,7 @@ services:
       SWAGGER_ENABLED: "true"
     depends_on:
       flyway:
-        condition: service_completed_successfully   # 마이그레이션이 실패하면 앱을 띄우지 않는다
+        condition: service_completed_successfully
 
   nginx:
     image: nginx:1.27-alpine
@@ -61,7 +61,7 @@ services:
       - app
 
   # ── 관측 스택: docker compose --profile monitoring up -d ──────────────
-  # 로그는 앱이 stdout에 쓰고 Alloy가 읽어 Loki로 민다(push). 메트릭은 Prometheus가 앱의 관리 포트를 긁어 간다(pull)
+  # 로그는 앱이 stdout에 쓰고 Alloy가 읽어 Loki로 push. 메트릭은 Prometheus가 앱의 관리 포트를 pull
 
   loki:
     profiles: ["monitoring"]
@@ -74,12 +74,12 @@ services:
   alloy:
     profiles: ["monitoring"]
     image: grafana/alloy:v1.5.1
-    user: root                                  # docker.sock으로 컨테이너 로그를 읽으려면 필요
+    user: root
     command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data"]
     volumes:
       - ./monitoring/config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - alloy-data:/var/lib/alloy/data          # 어디까지 읽었는지 기억한다. 없으면 재시작마다 같은 로그를 다시 보낸다
+      - alloy-data:/var/lib/alloy/data
     depends_on:
       - loki
 
