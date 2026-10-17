@@ -18,13 +18,13 @@
 
 | 파일 | 내용 |
 |---|---|
-| `infra/helm/inventory/Chart.yaml`, `values.yaml` | 차트 이름, 버전(`appVersion` = 이미지 태그 기본값), 대수, 이미지, DB, 리소스 |
+| `infra/helm/inventory/Chart.yaml`, `values.yaml` | 차트 이름, 차트 버전, 대수, 이미지, DB, 리소스 |
 | `templates/deployment.yaml` | 앱 Pod (probe 3종, DB env, 롤링 전략) |
 | `templates/service.yaml` | 80 → 앱 8080 |
 | `templates/migration-job.yaml` | flyway 이미지로 마이그레이션하는 Helm hook Job |
 | `infra/helm/monitoring/kube-prometheus-stack.yaml` | Prometheus, Grafana. 앱 지표 수집 job, Loki 데이터소스 추가 |
 | `infra/helm/monitoring/loki.yaml` | Loki 단일 바이너리 (compose `loki.yml`과 같은 설정) |
-| `infra/helm/monitoring/alloy.yaml` | 앱 Pod 로그를 Loki로 (compose `config.alloy`와 같은 라벨) |
+| `infra/helm/monitoring/k8s-monitoring.yaml` | 앱 Pod 로그를 Loki로. 차트가 Alloy 설정을 만들고, 우리는 대상과 라벨만 정한다 |
 | `.github/workflows/ci.yml` | `helm` job(lint, template, kubeconform). main push 때 `image` job(이미지 빌드, push), `update-tag` job(values의 tag 수정 커밋) |
 | `infra/argocd/application.yaml` | ArgoCD Application: 이 레포 main의 `infra/helm/inventory`를 `inventory` namespace에 자동 배포 |
 | `infra/helm/README.md` | 설치, 업그레이드, 관측 스택 설치, minikube 확인 명령 |
@@ -69,19 +69,42 @@ annotations:
 
 #### 4. 관측 스택 (compose `--profile monitoring`을 k8s로)
 
-공개 차트를 `helm install`하고, 우리는 values만 둔다. 대시보드는 compose와 같은 `infra/monitoring/grafana/dashboards/inventory.json`을 ConfigMap으로 올린다.
+공개 차트를 `helm install`하고, 우리는 values만 둔다. 대시보드는 compose와 같은 `infra/monitoring/grafana/dashboards/inventory.json`을 설치 명령의 `--set-file`로 Grafana 차트에 넣는다. 차트가 ConfigMap을 만들어 Grafana에 마운트한다. ConfigMap을 `kubectl create`로 따로 만들면 git에 정의가 남지 않고, YAML로 따로 쓰면 JSON이 compose와 두 벌이 된다.
 
 | compose | k8s | 우리가 넣는 설정 |
 |---|---|---|
-| Prometheus 컨테이너, `dns_sd_configs`로 app 찾기 | kube-prometheus-stack의 Prometheus | `additionalScrapeConfigs`에 inventory job: `app=inventory` Pod마다 `:8081/actuator/prometheus`, 15초 |
+| Prometheus 컨테이너, `dns_sd_configs`로 app 찾기 | kube-prometheus-stack의 Prometheus | `additionalScrapeConfigs`에 inventory job: `app=inventory` Pod마다 `:8081/actuator/prometheus`, 15초. 저장소 PVC 5Gi |
 | Grafana 컨테이너, 데이터소스 파일 | kube-prometheus-stack의 Grafana | Loki 데이터소스(uid `loki`). Prometheus 데이터소스 uid는 차트 기본값이 `prometheus`라 그대로 맞는다 |
 | Loki 컨테이너 | grafana/loki 단일 바이너리 | 파일시스템 저장, 7일 보관 |
-| Alloy가 Docker 소켓으로 로그 읽기 | grafana/alloy가 k8s API로 Pod 로그 읽기 | `app=inventory` Pod만, 라벨 `service="app"`, `container`=Pod 이름, `level` |
-| 대시보드 파일 마운트 | `grafana_dashboard=1` 라벨 ConfigMap | 같은 JSON |
+| Alloy가 Docker 소켓으로 로그 읽기 | grafana/k8s-monitoring이 노드마다 Alloy 하나(DaemonSet)를 띄워 노드의 Pod 로그 파일(`/var/log/pods`) 읽기 | `app=inventory` Pod만, 고정 라벨 `service="app"`, JSON에서 꺼낸 `level`. Pod 이름은 차트 기본값대로 `pod` |
+| 대시보드 파일 마운트 | Grafana 차트의 `dashboards`, `dashboardProviders` + `--set-file` | 같은 JSON |
 
 - kube-prometheus-stack은 학습한 설치 방법(Prometheus와 Grafana를 한 번에 설치, 연결까지 끝난 상태)을 그대로 쓴다. compose에 없던 Alertmanager는 끈다.
+- compose와 맞추는 것은 대시보드를 그대로 쓰는 데 필요한 부분(데이터소스 uid, 로그 라벨, 수집 경로와 주기)이다. 나머지 설정은 각자 이유가 있을 때만 넣는다.
+
+  | 설정 | 판단 |
+  |---|---|
+  | **Prometheus 저장소 PVC 5Gi (넣음)** | 차트 기본은 Pod 안 임시 디렉터리라, 노드 재부팅이나 차트 업그레이드로 Prometheus Pod가 다시 뜨면 그때까지의 지표가 모두 사라진다. 로그는 Loki PVC에 7일 남는데 지표만 비면, 장애 시점의 로그와 그래프를 맞춰 볼 수 없다 |
+  | `sample_limit` (안 넣음) | 지표 라벨에 요청마다 다른 값이 들어가는 실수를 막는 방어 장치다. 지금 지표는 이름과 라벨이 고정이고 테스트가 확인한다. 실수가 생기면 Prometheus 메모리 증가로 드러난다 |
+  | Loki 사용 통계 끄기 (안 넣음) | Loki가 버전과 구성 같은 익명 통계를 보낸다. 로그 내용은 보내지 않아 동작이나 보안에 영향이 없다 |
+
 - Loki 라벨을 compose와 같게(`service="app"`) 붙여, 대시보드의 로그 쿼리(`{service="app"}`)를 고치지 않고 쓴다.
-- Alloy는 하나만 띄워 k8s API로 로그를 읽는다. 노드가 많아지면 노드마다 하나(DaemonSet)로 바꾼다.
+- Alloy는 노드마다 하나(DaemonSet)로 띄워 자기 노드의 로그 파일을 읽는다. 앱 Pod마다 붙이는 사이드카가 아니라서, 앱을 몇 대로 늘려도 Alloy 수는 노드 수와 같다.
+
+  | 수집 방식 | 동작 | 판단 |
+  |---|---|---|
+  | **노드마다 하나, 로그 파일 읽기 (선택)** | 노드 1에 앱 Pod 3대가 있으면 노드 1의 Alloy 하나가 `/var/log/pods` 아래 세 Pod의 파일을 읽는다. 노드 2가 생기면 Alloy도 자동으로 하나 더 뜬다 | 운영 클러스터의 일반적인 방식이다. 로그가 k8s API 서버를 거치지 않는다. 대신 노드 디렉터리를 마운트하고, 자기 노드의 Pod만 고르고(`spec.nodeName`), 파일 형식(CRI)을 벗겨야 한다 |
+  | 클러스터에 하나, k8s API로 읽기 | Alloy 한 대가 API 서버에 노드 1, 노드 2 Pod의 로그를 요청한다 | 설정은 compose와 가장 비슷하다. 하지만 앱 로그가 모두 API 서버를 지나가서, 로그가 많아지면 클러스터 제어부에 부담을 준다 |
+  | 앱 Pod마다 사이드카 | 앱 Pod 3대에 Alloy가 하나씩, 3개 | 앱 차트를 고쳐야 하고 앱 대수만큼 Alloy가 늘어난다. 앱이 stdout에 쓰므로 필요 없다 |
+
+- Alloy 설정은 직접 쓰지 않고 Grafana의 k8s 수집 차트(k8s-monitoring)에 맡긴다. 우리 values에는 수집 대상(`app=inventory`), 고정 라벨(`service="app"`), JSON에서 `level`과 시각을 꺼내는 단계만 둔다.
+
+  | Alloy 설정 방식 | 동작 | 판단 |
+  |---|---|---|
+  | **k8s-monitoring 차트 (선택)** | values에 대상과 라벨만 적으면 노드 탐색, 파일 경로, 런타임별 파일 형식(containerd는 CRI, docker는 docker JSON), `filename` 라벨 정리를 차트가 만든다 | Grafana가 k8s 수집에 권장하는 경로다. minikube 런타임(docker)과 운영 런타임(containerd)을 같은 values로 처리한다. 대신 Alloy operator(Deployment 하나와 CRD)가 함께 설치되고, `namespace`, `job`, `cluster` 같은 차트 기본 라벨이 더 붙는다 |
+  | grafana/alloy 차트에 설정 직접 작성 | 위 처리를 Alloy 설정 언어로 80줄가량 직접 쓴다 | 무엇을 하는지 한 파일에서 다 보이지만, 런타임마다 파일 형식을 따로 처리해야 하고 차트 버전이 오를 때 맞추는 일도 우리 몫이다 |
+
+- 대시보드의 로그 쿼리는 `service`와 `level`만 쓴다(`{service="app"} |= "Slow query took"`, `{service="app", level=~"WARN|ERROR"}`). 차트 기본 라벨이 더 붙어도 쿼리는 그대로 맞는다.
 
 #### 5. CI — 차트 검사
 
@@ -173,3 +196,4 @@ main push → ci.yml: build(테스트), helm(차트 검사)
 - 2026-10-16: 이미지 배포 시점을 main push에서 배포 태그(`v*.*.*`) push로 바꿈. 이미지 태그도 `sha-`에서 버전(`1.2.3`)으로
 - 2026-10-16: k8s 기능을 기초 수준으로 줄임 (PDB, 보안 컨텍스트, preStop, `_helpers.tpl`, `required` 제거, 이미지 태그 기본값은 `appVersion`). 관측 스택(kube-prometheus-stack, Loki, Alloy)과 compose 대시보드를 k8s에도 추가
 - 2026-10-16: 배포를 실습과 같은 GitOps로 바꿈. main push → 커밋 SHA 이미지(Docker Hub) → CI가 values.yaml tag 커밋 → ArgoCD 자동 배포. 배포 태그 방식과 release.yml 제거. 레포는 과제 조건대로 하나
+- 2026-10-17: Alloy를 k8s API로 읽는 1대에서 노드마다 하나(DaemonSet), 노드 로그 파일 읽기로 바꿈. Alloy 설정은 grafana/alloy 직접 작성 대신 k8s-monitoring 차트로. `appVersion` 제거. Prometheus 저장소 PVC 추가. 대시보드를 kubectl ConfigMap 대신 차트 values와 `--set-file`로
