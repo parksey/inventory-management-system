@@ -13,6 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.ServletWebRequest;
@@ -83,6 +84,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                     .flatMap(result -> result.getResolvableErrors().stream()
                             .map(error -> new InvalidField(result.getMethodParameter().getParameterName(), error.getDefaultMessage())))
                     .toList();
+            case MissingRequestHeaderException ex -> List.of(new InvalidField(ex.getHeaderName(), "필수 헤더가 없습니다"));
             default -> List.of();
         };
     }
