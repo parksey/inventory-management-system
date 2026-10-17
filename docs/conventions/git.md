@@ -1,6 +1,6 @@
 # Git 컨벤션
 
-브랜치 · 커밋 · 이슈 · PR 규칙의 원본. 작업 흐름 전체는 [workflow.md](workflow.md)를 본다.
+브랜치, 커밋, 이슈, PR 규칙의 원본. 작업 흐름 전체는 [workflow.md](workflow.md)를 본다.
 
 ---
 
@@ -40,15 +40,13 @@ dev  ──●────────●────────●──▶   
 | `feat` | 새 기능 |
 | `fix` | 버그 수정 |
 | `refactor` | 동작 변경 없는 구조 개선 |
-| `test` | 테스트 추가·보강 |
+| `test` | 테스트 추가, 보강 |
 | `docs` | 문서 |
-| `chore` | 빌드·설정·환경 |
-| `ci` | CI 파이프라인 |
-| `deploy` | 배포·인프라 (Docker, Helm) |
+| `chore` | 빌드, 설정, CI, 배포 (Docker, Helm) |
 
-- scope: `product` `inventory` `transaction` `common` `api` `db` `flyway` `infra` `harness` 등 변경 영역
+- scope: `product` `inventory` `transaction` `common` `api` `db` `flyway` `infra` `harness` 등 변경 영역. `api`는 `app` 모듈(Controller, 응답 형식, 로깅 설정), `infra`는 compose, Dockerfile, Helm, CI
 - 제목: 한국어, 50자 이내, 마침표 없음
-- 한 커밋 = 한 논리적 변경. 커밋마다 빌드·테스트가 통과해야 한다
+- 한 커밋 = 한 논리적 변경. 커밋마다 빌드, 테스트가 통과해야 한다
 
 ```
 ✅ feat(inventory): 출고 시 재고 부족 검증 추가
@@ -69,12 +67,12 @@ dev  ──●────────●────────●──▶   
 | 기능 개발 | 없던 기능을 만든다 | `feat` |
 | 기능 수정 | 있는 기능의 동작을 바꾼다 | `feat` (구조만 바꾸면 `refactor`) |
 | 버그 수정 | 의도와 다르게 동작하는 것을 고친다 | `fix` |
-| 작업 | 빌드 · CI · 배포 · 문서 등 기능 외 작업 | `chore` `docs` `refactor` |
+| 작업 | 빌드, CI, 배포, 문서 등 기능 외 작업 | `chore` `docs` `refactor` |
 
 | 라벨 | 값 |
 |---|---|
 | 유형 | 위 표 |
-| 우선순위 | `P0` 필수 · `P1` 권장 · `P2` 여유 시 |
+| 우선순위 | `P0` 필수, `P1` 권장, `P2` 여유 시 |
 
 - 제목: `{type}({scope}): {무엇을}` — 예: `feat(inventory): 상품 출고`. 요구사항 이슈는 `[요구사항] {기능}` — 예: `[요구사항] 재고 출고`
 - 구체화로 나온 이슈는 요구사항 이슈의 **sub-issue**로 연결한다.
@@ -91,24 +89,24 @@ PR은 **어떻게 개발했는지**를 쓴다. 한 이슈에서 기능 명세서
 | 제목 | 커밋 형식과 동일 — `feat(inventory): 출고 도메인 로직 구현` |
 | 본문 | PR 템플릿의 모든 섹션 작성. 한 일만 적고, 해당 없는 섹션은 "없음". **테스트 케이스 표 필수** ([workflow.md §5](workflow.md#5-테스트-규칙)) |
 | 이슈 연결 | 중간 PR은 `Refs #N`, 이슈를 끝내는 마지막 PR은 `Closes #N` |
-| 라벨 · 담당자 | 이슈와 같은 라벨, 담당자는 본인 |
+| 라벨과 담당자 | 이슈와 같은 라벨, 담당자는 본인 |
 | PR 연 뒤 수정 | 새 커밋으로 올린다. 기존 커밋을 고쳐 force-push하지 않는다 (예외: dev rebase) |
 | 셀프 리뷰 | 머지 전 "Files changed"에서 판단이 들어간 지점에 리뷰 코멘트로 근거를 남긴다 |
-| 머지 조건 | CI 통과 (빌드 · 테스트), 최신 dev 반영, 개발자의 머지 지시 |
+| 머지 조건 | CI 통과 (빌드, 테스트), 최신 dev 반영, 개발자의 머지 지시 |
 
 ---
 
 ## 5. 머지와 정리
 
-- **Squash merge만** 허용한다. dev 히스토리는 PR 하나당 커밋 하나로 유지되고, 세부 커밋은 PR에 남는다.
-- 머지할 때 커밋 제목을 직접 지정한다. GitHub 기본값은 `PR 제목 (#PR번호)`라서 PR 번호가 붙는다.
+- **merge commit**으로 합친다. `git log --first-parent dev`로 보면 PR 하나당 커밋 하나이고, 세부 커밋은 두 번째 부모 쪽에 그대로 남는다.
+- 머지할 때 커밋 제목을 PR 제목으로 직접 지정한다. GitHub 기본값은 `Merge pull request #N from ...`이라 무슨 변경인지 보이지 않는다.
   ```bash
-  gh pr merge {PR} --squash --delete-branch --subject "feat(inventory): 출고 도메인 로직 구현"
+  gh pr merge {PR} --merge --delete-branch --subject "feat(inventory): 출고 도메인 로직 구현"
   ```
 - 머지 후 원격 브랜치는 자동 삭제된다. 로컬은 `git fetch --prune`으로 정리한다.
 - 다음 작업은 항상 `origin/dev`에서 분기한다: `git fetch origin && git switch -c {브랜치} origin/dev` (worktree에서도 동작)
 - 브랜치가 dev보다 뒤처지거나 충돌하면 `git rebase origin/dev` 후 `git push --force-with-lease`
-- dev → main(배포) PR은 merge commit으로 합친다. squash하면 dev와 main의 이력이 갈라진다
+- dev → main(배포) PR도 merge commit으로 합친다. squash하면 dev와 main의 이력이 갈라진다
 
 ---
 
