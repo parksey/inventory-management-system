@@ -1,4 +1,4 @@
-FROM amazoncorretto:21-alpine AS build
+FROM --platform=$BUILDPLATFORM amazoncorretto:21-alpine AS build
 WORKDIR /workspace
 COPY . .
 

@@ -75,6 +75,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: docker/setup-qemu-action@v4     # 러너(amd64)에서 arm64 이미지를 만들기 위한 에뮬레이터
+
       - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v4
@@ -86,6 +88,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64      # 태그 하나에 두 플랫폼. 노드가 자기 플랫폼 이미지를 받는다
           push: true
           # latest 대신 커밋 SHA를 태그로 → values.yaml이 바뀌어야 ArgoCD가 감지한다
           tags: docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ matrix.name }}:${{ github.sha }}
