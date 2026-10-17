@@ -1,4 +1,3 @@
-# jar는 플랫폼과 상관없으므로 빌드는 빌드하는 기계의 플랫폼에서 한 번만 한다 (arm64 이미지도 에뮬레이션 없이 같은 jar를 쓴다)
 FROM --platform=$BUILDPLATFORM amazoncorretto:21-alpine AS build
 WORKDIR /workspace
 COPY . .
