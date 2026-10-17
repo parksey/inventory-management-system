@@ -9,6 +9,7 @@ metadata:
 
 spec:
   backoffLimit: 1
+  activeDeadlineSeconds: 300
   template:
     spec:
       restartPolicy: Never
@@ -16,7 +17,7 @@ spec:
         - name: flyway
           image: "{{ .Values.migration.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args: ["-connectRetries=10", "migrate"]
+          args: ["-connectRetries=10", "-connectRetriesInterval=10", "migrate"]
           env:
             - name: FLYWAY_URL
               value: {{ .Values.database.url | quote }}
