@@ -1,10 +1,14 @@
-# prometheus-community/kube-prometheus-stack: Prometheus, Grafana를 한 번에 설치한다
-# 우리가 더하는 것은 두 가지: 앱 지표 수집 job, Grafana의 Loki 데이터소스
-
 prometheus:
   prometheusSpec:
-    scrapeInterval: 15s         # compose와 같게 (기본 30s)
-    # compose의 prometheus.yml과 같은 job. app=inventory 라벨이 붙은 Pod마다 :8081/actuator/prometheus를 긁는다
+    scrapeInterval: 15s
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          resources:
+            requests:
+              storage: 5Gi
+
     additionalScrapeConfigs:
       - job_name: inventory
         metrics_path: /actuator/prometheus
@@ -22,8 +26,19 @@ grafana:
   additionalDataSources:
     - name: Loki
       type: loki
-      uid: loki                 # compose 대시보드가 쓰는 uid
+      uid: loki
       url: http://loki.monitoring.svc:3100
 
+  dashboardProviders:
+    inventory.yaml:
+      apiVersion: 1
+      providers:
+        - name: inventory
+          type: file
+          options:
+            path: /var/lib/grafana/dashboards/inventory
+  dashboards:
+    inventory: {}   # 설치할 때 --set-file로 compose와 같은 대시보드 JSON을 넣는다
+
 alertmanager:
-  enabled: false                # compose 구성에 없다
+  enabled: false # 추후 추가

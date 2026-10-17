@@ -1,4 +1,4 @@
-# grafana/loki 단일 바이너리 모드. compose의 loki.yml과 같은 설정 (파일시스템 저장, 7일 보관)
+# grafana/loki 단일 바이너리 모드. (파일시스템 저장, 7일 보관)
 deploymentMode: SingleBinary
 
 loki:
@@ -7,9 +7,10 @@ loki:
     replication_factor: 1
   storage:
     type: filesystem
+
   schemaConfig:
     configs:
-      - from: "2024-01-01"
+      - from: "2026-10-16"
         store: tsdb
         object_store: filesystem
         schema: v13
@@ -27,7 +28,6 @@ singleBinary:
   persistence:
     size: 5Gi
 
-# 단일 바이너리에서 쓰지 않는 구성 요소
 read:
   replicas: 0
 write:
