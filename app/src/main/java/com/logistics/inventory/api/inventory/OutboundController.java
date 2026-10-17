@@ -23,11 +23,12 @@ public class OutboundController {
     @PostMapping("/{productCode}/outbound")
     public ApiResponse<Void> outbound(
             @PathVariable final String productCode,
-            @RequestHeader(ApiHeaders.REQUESTER_ID) final String requesterId,   // 형식은 RequesterId가 검증
-            @RequestHeader(ApiHeaders.IDEMPOTENCY_KEY) final String idempotencyKey,   // 형식은 IdempotencyKey가 검증
+            @RequestHeader(ApiHeaders.COMPANY_CODE) final String companyCode,
+            @RequestHeader(ApiHeaders.REQUESTER_ID) final String requesterId,
+            @RequestHeader(ApiHeaders.IDEMPOTENCY_KEY) final String idempotencyKey,
             @Valid @RequestBody final OutboundRequest request
     ) {
-        inventoryService.outbound(new IdempotencyKey(idempotencyKey), request.toCommand(productCode, requesterId));
+        inventoryService.outbound(new IdempotencyKey(idempotencyKey), request.toCommand(companyCode, productCode, requesterId));
         return ApiResponse.ok(null);
     }
 }

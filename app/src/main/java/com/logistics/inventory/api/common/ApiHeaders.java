@@ -3,6 +3,9 @@ package com.logistics.inventory.api.common;
 // 여러 API가 함께 쓰는 요청 헤더 이름
 public final class ApiHeaders {
 
+    // 회사 코드. 요청이 어느 회사의 데이터에 적용되는지 정한다.
+    public static final String COMPANY_CODE = "X-Company-Code";
+
     // 요청자 ID. 인증을 붙이면 앞단이 인증 후 넣어 준다
     public static final String REQUESTER_ID = "X-User-Id";
 

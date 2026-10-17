@@ -32,11 +32,12 @@ import org.springframework.web.client.RestClient;
 @Import(TestcontainersConfig.class)
 @Sql(statements = {
         "TRUNCATE stock_transaction, inventory, product RESTART IDENTITY",
-        "INSERT INTO product (product_code, name) VALUES ('TS-BASIC-BLK-M', 'TS-BASIC-BLK-M')",
+        "INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', 'TS-BASIC-BLK-M', 'TS-BASIC-BLK-M')",
         "INSERT INTO inventory (product_id, quantity) SELECT id, 5 FROM product WHERE product_code = 'TS-BASIC-BLK-M'"
 })
 class ProductRenameApiTest {
 
+    private static final String COMPANY_CODE = "COMPANY-A";
     private static final String PRODUCT_CODE = "TS-BASIC-BLK-M";
 
     @LocalServerPort
@@ -69,6 +70,7 @@ class ProductRenameApiTest {
 
         final ResponseEntity<String> stock = client.get()
                 .uri("/api/v1/inventory/{code}", PRODUCT_CODE)
+                .header("X-Company-Code", COMPANY_CODE)
                 .retrieve().toEntity(String.class);
         assertThat(JsonPath.<String>read(stock.getBody(), "$.data.name")).isEqualTo("베이직 반팔 티셔츠 검정 M");
     }
@@ -141,6 +143,7 @@ class ProductRenameApiTest {
     private ResponseEntity<String> rename(final String productCode, final String body) {
         return client.patch()
                 .uri("/api/v1/products/{code}", productCode)
+                .header("X-Company-Code", COMPANY_CODE)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
                 .retrieve().toEntity(String.class);

@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.logistics.inventory.domain.common.BusinessException;
+import com.logistics.inventory.domain.common.CompanyCode;
 import com.logistics.inventory.domain.inventory.entity.Quantity;
 import com.logistics.inventory.domain.product.entity.ProductCode;
 import com.logistics.inventory.domain.transaction.entity.RequesterId;
@@ -19,16 +20,17 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 class IdempotencyRecordTest {
 
+    private static final CompanyCode COMPANY = new CompanyCode("COMPANY-A");
     private static final IdempotencyKey KEY = new IdempotencyKey("K1");
 
     private final IdempotencyRecord stored = IdempotencyRecord.of(
-            KEY, OUTBOUND, new ProductCode("TS-BASIC-BLK-M"), new Quantity(3), new RequesterId("worker-01"));
+            COMPANY, KEY, OUTBOUND, new ProductCode("TS-BASIC-BLK-M"), new Quantity(3), new RequesterId("worker-01"));
 
     @Test
     @DisplayName("TC-15-02 같은 키로 같은 내용이 오면 재전송이라 예외가 없다")
     void 같은_내용() {
         final IdempotencyRecord request = IdempotencyRecord.of(
-                KEY, OUTBOUND, new ProductCode("TS-BASIC-BLK-M"), new Quantity(3), new RequesterId("worker-01"));
+                COMPANY, KEY, OUTBOUND, new ProductCode("TS-BASIC-BLK-M"), new Quantity(3), new RequesterId("worker-01"));
 
         assertThatCode(() -> stored.verifySameRequest(request)).doesNotThrowAnyException();
     }
@@ -48,10 +50,10 @@ class IdempotencyRecordTest {
         final Quantity three = new Quantity(3);
         final RequesterId worker = new RequesterId("worker-01");
         return Stream.of(
-                Arguments.of("type", IdempotencyRecord.of(KEY, INBOUND, code, three, worker)),
-                Arguments.of("productCode", IdempotencyRecord.of(KEY, OUTBOUND, new ProductCode("TS-BASIC-WHT-M"), three, worker)),
-                Arguments.of("quantity", IdempotencyRecord.of(KEY, OUTBOUND, code, new Quantity(5), worker)),
-                Arguments.of("requesterId", IdempotencyRecord.of(KEY, OUTBOUND, code, three, new RequesterId("worker-02")))
+                Arguments.of("type", IdempotencyRecord.of(COMPANY, KEY, INBOUND, code, three, worker)),
+                Arguments.of("productCode", IdempotencyRecord.of(COMPANY, KEY, OUTBOUND, new ProductCode("TS-BASIC-WHT-M"), three, worker)),
+                Arguments.of("quantity", IdempotencyRecord.of(COMPANY, KEY, OUTBOUND, code, new Quantity(5), worker)),
+                Arguments.of("requesterId", IdempotencyRecord.of(COMPANY, KEY, OUTBOUND, code, three, new RequesterId("worker-02")))
         );
     }
 }

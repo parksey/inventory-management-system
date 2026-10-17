@@ -18,7 +18,7 @@ public class ProductService {
 
     @Transactional
     public void rename(final RenameProductCommand command) {
-        final Product product = productStore.findByProductCode(command.productCode())
+        final Product product = productStore.findByProductCode(command.companyCode(), command.productCode())
             .orElseThrow(() -> BusinessException.of(PRODUCT_NOT_FOUND, "productCode=" + command.productCode().value()));
         product.rename(command.name());
     }
