@@ -1,6 +1,10 @@
 spring:
   profiles:
     default: local
+  task:
+    scheduling:
+      pool:
+        size: 3
   application:
     name: inventory
   config:
@@ -12,6 +16,13 @@ spring:
       accept-float-as-int: false
   lifecycle:
     timeout-per-shutdown-phase: 20s
+
+inventory:
+  outbox:
+    interval: 1s
+    recovery-interval: 10s
+  erp:
+    lookup-backoff: 10s, 1m, 5m, 15m, 1h
 
 server:
   shutdown: graceful

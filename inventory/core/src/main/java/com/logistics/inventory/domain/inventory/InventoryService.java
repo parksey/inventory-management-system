@@ -17,6 +17,8 @@ import com.logistics.inventory.domain.inventory.model.InboundCommand;
 import com.logistics.inventory.domain.inventory.model.OutboundCommand;
 import com.logistics.inventory.domain.inventory.model.StockResult;
 import com.logistics.inventory.domain.inventory.port.InventoryStore;
+import com.logistics.inventory.domain.outbox.entity.OutboxMessage;
+import com.logistics.inventory.domain.outbox.port.OutboxStore;
 import com.logistics.inventory.domain.product.entity.Product;
 import com.logistics.inventory.domain.product.entity.ProductCode;
 import com.logistics.inventory.domain.product.port.ProductStore;
@@ -37,6 +39,7 @@ public class InventoryService {
     private final InventoryStore inventoryStore;
     private final StockTransactionStore stockTransactionStore;
     private final IdempotencyStore idempotencyStore;
+    private final OutboxStore outboxStore;
     private final ApplicationEventPublisher eventPublisher;
 
     @Transactional(readOnly = true)
@@ -77,7 +80,16 @@ public class InventoryService {
         final Inventory inventory = getInventoryForUpdate(product.getId());
         final StockChange change = inventory.increase(command.quantity());
         // 원장 (StockTransaction)
-        stockTransactionStore.save(StockTransaction.record(change, command.requesterId()));
+        final StockTransaction transaction = StockTransaction.record(change, command.requesterId());
+        stockTransactionStore.save(transaction);
+        // 외부 알림 메시지 (OutboxMessage) — 같은 트랜잭션. 롤백되면 함께 사라지고, 커밋되면 반드시 남는다
+        outboxStore.save(OutboxMessage.stockChanged(
+            command.companyCode(),
+            command.productCode(),
+            transaction.getId(),
+            change,
+            transaction.getCreatedAt()
+        ));
         // 커밋된 뒤 지표와 로그가 받는다. 롤백되면 전달되지 않는다
         eventPublisher.publishEvent(change);
     }
@@ -100,7 +112,16 @@ public class InventoryService {
         final Inventory inventory = getInventoryForUpdate(product.getId());
         final StockChange change = inventory.decrease(command.quantity());
         // 원장 (StockTransaction)
-        stockTransactionStore.save(StockTransaction.record(change, command.requesterId()));
+        final StockTransaction transaction = StockTransaction.record(change, command.requesterId());
+        stockTransactionStore.save(transaction);
+        // 외부 알림 메시지 (OutboxMessage) — 같은 트랜잭션. 롤백되면 함께 사라지고, 커밋되면 반드시 남는다
+        outboxStore.save(OutboxMessage.stockChanged(
+            command.companyCode(),
+            command.productCode(),
+            transaction.getId(),
+            change,
+            transaction.getCreatedAt()
+        ));
         // 커밋된 뒤 지표와 로그가 받는다. 롤백되면 전달되지 않는다
         eventPublisher.publishEvent(change);
     }
