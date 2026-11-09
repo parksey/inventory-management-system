@@ -1,6 +1,7 @@
 package com.logistics.inventory.domain.outbox.entity;
 
 import com.logistics.inventory.domain.common.CompanyCode;
+import com.logistics.inventory.domain.common.RetryPolicy;
 import com.logistics.inventory.domain.inventory.entity.StockChange;
 import com.logistics.inventory.domain.product.entity.ProductCode;
 import jakarta.persistence.AttributeOverride;
@@ -12,9 +13,10 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.Optional;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -60,10 +62,22 @@ public class OutboxMessage {
     @Column(nullable = false)
     private int attempts;
 
-    @Column(name = "available_at", nullable = false)
+    @Column(name = "available_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime availableAt;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column(name = "locked_by")
+    private String lockedBy;
+
+    @Column(name = "locked_at")
+    private OffsetDateTime lockedAt;
+
+    @Column(name = "published_at")
+    private OffsetDateTime publishedAt;
+
+    @Column(name = "last_error")
+    private String lastError;
+
+    @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 
     @Builder(access = AccessLevel.PRIVATE)
@@ -81,6 +95,35 @@ public class OutboxMessage {
         this.payload = payload;
         this.status = OutboxStatus.PENDING;
         this.attempts = 0;
+    }
+
+    public boolean isClaimedBy(final String workerId) {
+        return status == OutboxStatus.PENDING && workerId.equals(lockedBy);
+    }
+
+    public void markPublished() {
+        if (status != OutboxStatus.PENDING) {
+            throw new IllegalStateException("PENDING 메시지만 넘길 수 있습니다. status=" + status);
+        }
+        this.status = OutboxStatus.PUBLISHED;
+        this.publishedAt = OffsetDateTime.now();
+        release();
+    }
+
+    public Optional<Duration> recordRelayFailure(final String error) {
+        this.attempts++;
+        this.lastError = error;
+        release();
+        if (RetryPolicy.isExhausted(attempts)) {
+            this.status = OutboxStatus.REQUIRES_REVIEW;
+            return Optional.empty();
+        }
+        return Optional.of(RetryPolicy.backoff(attempts));
+    }
+
+    private void release() {
+        this.lockedBy = null;
+        this.lockedAt = null;
     }
 
     // 원장 한 건의 재고 변동. 원장을 먼저 저장해 id가 있어야 한다
@@ -111,12 +154,5 @@ public class OutboxMessage {
             .eventType(STOCK_CHANGED)
             .payload(payload)
             .build();
-    }
-
-    @PrePersist
-    void onCreate() {
-        final OffsetDateTime now = OffsetDateTime.now();
-        this.createdAt = now;
-        this.availableAt = now;
     }
 }

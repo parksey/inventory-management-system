@@ -36,7 +36,7 @@ class OutboxMessageSchemaTest {
 
     @BeforeEach
     void clean() throws SQLException {
-        execute("TRUNCATE outbox_message RESTART IDENTITY");
+        execute("TRUNCATE erp_sync, outbox_message RESTART IDENTITY");
     }
 
     @Test

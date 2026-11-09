@@ -8,6 +8,7 @@ import com.logistics.inventory.domain.common.CompanyCode;
 import com.logistics.inventory.domain.inventory.entity.Quantity;
 import com.logistics.inventory.domain.inventory.entity.StockChange;
 import com.logistics.inventory.domain.product.entity.ProductCode;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,23 @@ class OutboxMessageTest {
         assertThat(message.getEventType()).isEqualTo("STOCK_CHANGED");
         assertThat(message.getPayload()).isEqualTo(new StockChangedPayload(
                 101L, "COMPANY-A", "TS-BASIC-BLK-M", OUTBOUND, 3, 10, 7, "2026-11-09T13:00+09:00"));
+    }
+
+    @Test
+    @DisplayName("TC-48-29 중계 실패는 1, 2, 4, 8초 뒤로 미루고 5번째 실패에서 사람 확인(REQUIRES_REVIEW)이 된다")
+    void 중계_실패_백오프() {
+        final OutboxMessage message = OutboxMessage.stockChanged(COMPANY, PRODUCT, 101L, OUTBOUND_3, OCCURRED_AT);
+
+        assertThat(message.recordRelayFailure("e1")).contains(Duration.ofSeconds(1));
+        assertThat(message.recordRelayFailure("e2")).contains(Duration.ofSeconds(2));
+        assertThat(message.recordRelayFailure("e3")).contains(Duration.ofSeconds(4));
+        assertThat(message.recordRelayFailure("e4")).contains(Duration.ofSeconds(8));
+        assertThat(message.getStatus()).isEqualTo(OutboxStatus.PENDING);
+
+        assertThat(message.recordRelayFailure("e5")).isEmpty();
+        assertThat(message.getStatus()).isEqualTo(OutboxStatus.REQUIRES_REVIEW);
+        assertThat(message.getAttempts()).isEqualTo(5);
+        assertThat(message.getLastError()).isEqualTo("e5");
     }
 
     @Test

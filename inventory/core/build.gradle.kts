@@ -10,4 +10,5 @@ dependencies {
 
     testCompileOnly("jakarta.persistence:jakarta.persistence-api")
     testCompileOnly("org.hibernate.orm:hibernate-core")
+    testImplementation("org.springframework:spring-tx")   // 실패 분류기 테스트에서 Spring 데이터 접근 예외를 만든다
 }

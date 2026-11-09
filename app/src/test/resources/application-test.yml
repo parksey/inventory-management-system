@@ -4,3 +4,9 @@ decorator:
     enabled: true
     p6spy:
       enable-logging: false       # 테스트 로그 노이즈 방지. 디버깅할 때만 true
+
+inventory:
+  outbox:
+    initial-delay: 1h           # 테스트는 배치를 직접 불러 순서와 시점을 정한다. 테스트 중에는 스케줄러가 돌지 않게 늦춘다
+    interval: 1h
+    recovery-interval: 1h

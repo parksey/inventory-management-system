@@ -14,7 +14,7 @@ CREATE TABLE outbox_message (
     published_at    TIMESTAMPTZ,
     last_error      TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT ck_outbox_message_status CHECK (status IN ('PENDING', 'PUBLISHED')),
+    CONSTRAINT ck_outbox_message_status CHECK (status IN ('PENDING', 'PUBLISHED', 'REQUIRES_REVIEW')),
     -- 업무 객체 하나에 같은 종류의 메시지는 하나뿐이다 (원장 한 건에 STOCK_CHANGED 하나)
     CONSTRAINT uk_outbox_message_event UNIQUE (aggregate_type, aggregate_id, event_type)
 );
