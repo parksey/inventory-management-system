@@ -20,7 +20,7 @@ import org.springframework.web.client.RestClient;
 @ActiveProfiles("test")
 @Import(TestcontainersConfig.class)
 @Sql(statements = {
-        "TRUNCATE idempotency_record, stock_transaction, inventory, product RESTART IDENTITY",
+        "TRUNCATE outbox_message, idempotency_record, stock_transaction, inventory, product RESTART IDENTITY",
         "INSERT INTO product (company_code, product_code, name) VALUES ('COMPANY-A', 'TS-BASIC-BLK-M', '베이직 반팔 티셔츠 검정 M')",
         "INSERT INTO inventory (product_id, quantity) SELECT id, 5 FROM product WHERE product_code = 'TS-BASIC-BLK-M'"
 })
